@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# display-switch — cycle laptop display modes with an external monitor.
+# Order: Extend -> Mirror -> External only -> Internal only -> Extend.
+# Safe no-op (toast) when no external display is connected.
+# Uses `hyprctl keyword monitor` (NOT dispatch — HyprMod hijacks dispatch).
+set -u
+
+N() {
+    command -v notify-send >/dev/null 2>&1 || return 0
+    notify-send -t 1800 -u low \
+        -h "string:x-canonical-private-synchronous:fnkey" \
+        "$1" "${2:-}" 2>/dev/null
+}
+have() { command -v "$1" >/dev/null 2>&1; }
+have hyprctl || { N "Display" "hyprctl not found"; exit 0; }
+
+json="$(hyprctl -j monitors all 2>/dev/null)"
+[ -z "$json" ] && { N "Display" "no monitor info"; exit 0; }
+
+parsed="$(printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit()
+ints = [m for m in d if m.get("name", "").startswith("eDP")]
+exts = [m for m in d if not m.get("name", "").startswith("eDP")]
+if not ints:
+    sys.exit()
+i = ints[0]["name"]
+imode = "%dx%d@%d" % (ints[0]["width"], ints[0]["height"], round(ints[0].get("refreshRate", 60)))
+if not exts:
+    print(i, imode, "")
+    sys.exit()
+print(i, imode, exts[0]["name"])
+' 2>/dev/null)"
+
+# shellcheck disable=SC2086
+set -- $parsed
+INT="${1:-}"
+IMODE="${2:-preferred}"
+EXT="${3:-}"
+[ -z "$INT" ] && { N "Display" "no internal monitor found"; exit 0; }
+[ -z "$EXT" ] && { N "Display" "no external display connected"; exit 0; }
+
+STATE="$HOME/.cache/display-mode"
+cur="$(cat "$STATE" 2>/dev/null || echo 0)"
+case "$cur" in ''|*[!0-9]*) cur=0 ;; esac
+next=$(( (cur + 1) % 4 ))
+
+case "$next" in
+    0)
+        hyprctl keyword monitor "$EXT,preferred,auto-right,auto"        >/dev/null 2>&1
+        hyprctl keyword monitor "$INT,$IMODE,auto,1"                    >/dev/null 2>&1
+        N "Display: Extend" "$EXT + $INT"
+        ;;
+    1)
+        hyprctl keyword monitor "$INT,$IMODE,auto,1"                    >/dev/null 2>&1
+        hyprctl keyword monitor "$EXT,preferred,auto,auto,mirror,$INT"  >/dev/null 2>&1
+        N "Display: Mirror" "$EXT = $INT"
+        ;;
+    2)
+        hyprctl keyword monitor "$EXT,preferred,auto,auto"              >/dev/null 2>&1
+        hyprctl keyword monitor "$INT,disable"                          >/dev/null 2>&1
+        N "Display: External only" "$EXT"
+        ;;
+    3)
+        hyprctl keyword monitor "$EXT,disable"                          >/dev/null 2>&1
+        hyprctl keyword monitor "$INT,$IMODE,auto,1"                    >/dev/null 2>&1
+        N "Display: Internal only" "$INT"
+        ;;
+esac
+printf '%s\n' "$next" > "$STATE"
+exit 0

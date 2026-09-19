@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# pick-wallpaper — pick a wallpaper by name (images or videos), apply via Super+W.
+DIR="$HOME/Pictures/Wallpapers"
+CONF="$HOME/.config/hypr/hyprpaper.conf"
+shopt -s nullglob
+
+files=("$DIR"/*.jpg "$DIR"/*.jpeg "$DIR"/*.png "$DIR"/*.gif \
+       "$DIR"/*.mp4 "$DIR"/*.webm "$DIR"/*.mkv)
+if [ "${#files[@]}" -eq 0 ]; then
+    notify-send -t 4000 "Wallpaper" "no wallpapers in $DIR" 2>/dev/null
+    exit 0
+fi
+
+menu=""
+for m in wofi yad rofi fuzzel bemenu dmenu; do
+    command -v "$m" >/dev/null 2>&1 && menu="$m" && break
+done
+
+if [ -z "$menu" ]; then
+    notify-send -t 4000 "Wallpaper" "no menu app (wofi/yad/rofi/fuzzel/bemenu/dmenu)" 2>/dev/null
+    exit 1
+fi
+
+chosen=""
+case "$menu" in
+    yad)
+        chosen="$(
+            yad --list --width=700 --height=700 --print-column=2 --column=Wallpaper \
+                "${files[@]}" --separator='\n' --button=OK:0 2>/dev/null | tr -d '\n'
+        )"
+        ;;
+    *)
+        chosen="$(for f in "${files[@]}"; do basename "$f"; done \
+            | "$menu" --dmenu --prompt "Wallpaper" 2>/dev/null)"
+        [ -n "$chosen" ] && chosen="$DIR/$chosen"
+        ;;
+esac
+
+[ -n "$chosen" ] && [ -f "$chosen" ] || exit 0
+
+printf 'preload = %s\nwallpaper = eDP-1,%s\n' "$chosen" "$chosen" > "$CONF"
+"$HOME/.local/bin/apply-wallpaper"
+notify-send -t 2500 "Wallpaper" "$(basename "$chosen")" 2>/dev/null

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# emoji-picker — offline, category-based emoji picker for Wayland.
+# Step 1: choose a category (or Favorites). Step 2: choose the emoji.
+# The emoji is TYPED into the focused window with wtype (no clipboard copy).
+# Bound to Super + numpad0.
+set -u
+
+DATA="$HOME/.local/share/emoji/emoji.tsv"
+FAV="$HOME/.local/share/emoji/favorites"
+mkdir -p "$(dirname "$DATA")"
+
+if [ ! -s "$DATA" ]; then
+    notify-send -t 4000 "Emoji" "emoji database missing: $DATA" 2>/dev/null
+    exit 1
+fi
+if ! command -v wtype >/dev/null 2>&1; then
+    notify-send -t 4000 "Emoji" "wtype is not installed" 2>/dev/null
+    exit 1
+fi
+
+menu() { wofi --show dmenu -i --prompt "$1"; }
+
+# --- 1. category menu (Favorites first when it exists) -----------------------
+cats="$(awk -F'\t' '!seen[$1]++ {print $1}' "$DATA")"
+top=""
+[ -s "$FAV" ] && top="Favorites"
+top="${top:+$top$'\n'}$cats"
+
+choice="$(printf '%s\n' "$top" | menu "Emoji")"
+[ -n "$choice" ] || exit 0
+
+# --- 2. emoji menu for the chosen category -----------------------------------
+if [ "$choice" = "Favorites" ]; then
+    list="$(cat "$FAV" 2>/dev/null)"
+else
+    list="$(awk -F'\t' -v c="$choice" '$1==c {print $2"  "$3}' "$DATA")"
+fi
+[ -n "$list" ] || exit 0
+
+sel="$(printf '%s\n' "$list" | menu "$choice")"
+[ -n "$sel" ] || exit 0
+
+emoji="$(printf '%s' "$sel" | awk '{print $1}')"
+[ -n "$emoji" ] || exit 0
+
+# remember the pick (bounded, most-recent last)
+if [ -n "$sel" ] && ! grep -qxF "$sel" "$FAV" 2>/dev/null; then
+    printf '%s\n' "$sel" >> "$FAV"
+    tail -n 40 "$FAV" > "$FAV.tmp" && mv "$FAV.tmp" "$FAV"
+fi
+
+# let the picker close and focus return, then type at the cursor
+sleep 0.15
+wtype -d 20 "$emoji"

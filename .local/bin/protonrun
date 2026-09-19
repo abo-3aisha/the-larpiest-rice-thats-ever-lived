@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+GAME="$1"
+PROTON="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-3/proton"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.proton"
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+"$PROTON" run "$GAME"

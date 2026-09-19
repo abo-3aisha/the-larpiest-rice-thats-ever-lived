@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# rand-wallpaper — apply a random wallpaper, image or video (Super+Shift+W).
+DIR="$HOME/Pictures/Wallpapers"
+CONF="$HOME/.config/hypr/hyprpaper.conf"
+set -u
+
+shopt -s nullglob
+picks=("$DIR"/*.jpg "$DIR"/*.jpeg "$DIR"/*.png "$DIR"/*.gif \
+       "$DIR"/*.mp4 "$DIR"/*.webm "$DIR"/*.mkv)
+[ "${#picks[@]}" -gt 0 ] || exit 0
+
+chosen="${picks[$((RANDOM % ${#picks[@]}))]}"
+printf 'preload = %s\nwallpaper = eDP-1,%s\n' "$chosen" "$chosen" > "$CONF"
+"$HOME/.local/bin/apply-wallpaper"
+notify-send -t 2500 "Wallpaper" "$(basename "$chosen")" 2>/dev/null

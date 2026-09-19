@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# nowpanel v3 — floating "top bar" dropdown: date/time + now-playing + dancing Miku + REAL cava eq,
+# cava sends raw levels on a pipe and WE render the bars, so nothing clears the screen.
+
+tput civis 2>/dev/null
+echo "$PPID" > /tmp/nowpanel.pid
+DANCE=""
+cleanup() { [ -n "$DANCE" ] && kill "$DANCE" 2>/dev/null; tput cnorm 2>/dev/null; rm -f /tmp/nowpanel.pid; }
+trap cleanup EXIT INT TERM
+
+CAVA_RAW="$HOME/.config/cava/raw.conf"
+BARS=28
+LEVELS=(░ ▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
+EDGE=($'\033[38;5;111m' $'\033[38;5;117m' $'\033[38;5;183m' $'\033[38;5;213m' $'\033[38;5;207m' $'\033[38;5;177m' $'\033[38;5;141m' $'\033[38;5;171m' $'\033[38;5;213m')
+
+now=$(LC_TIME=C date "+%A  %Y/%m/%d  %H:%M")
+meta=$(playerctl -a metadata --format '{{status}}|{{player}}|{{title}}|{{artist}}' 2>/dev/null \
+  | awk -F'|' '$1=="Playing"||$1=="Paused"{print; exit}')
+if [ -n "$meta" ]; then
+    media="$(echo "$meta" | cut -d'|' -f3)  —  $(echo "$meta" | cut -d'|' -f4)"
+    player="$(echo "$meta" | cut -d'|' -f2)  ($(echo "$meta" | cut -d'|' -f1))"
+else
+    media="Nothing playing right now"
+    player="No active media"
+fi
+
+printf '\033[1;1H\033[K\033[1m\033[38;5;213m%s\033[0m\n' "$now"
+printf '\033[2;1H\033[K\033[38;5;111m♪ %s\033[0m\n' "$media"
+printf '\033[3;1H\033[K\033[38;5;245m   %s\033[0m\n' "$player"
+printf '\033[4;1H\033[K\033[90m─\033[0m\n'
+
+frames=("(>ω<) ♪" "(*>o<) ♪" "(≧◡≦) ♪" "(>▽<) ♪" "(^‿^) ♪" "(✿◕‿◕) ♪")
+(
+    while :; do
+        for f in "${frames[@]}"; do
+            printf '\033[5;1H\033[K\033[38;5;220mMiku %s\033[0m' "$f"
+            sleep 0.4
+        done
+    done
+) &
+DANCE=$!
+
+render() {
+    # $1 = number of levels 0..9 to fill
+    n=$1
+    line=""
+    for b in $(seq 1 "$BARS"); do
+        r=$((RANDOM % 9))
+        if [ "$r" -lt "$n" ]; then line+="${EDGE[$((RANDOM % 9))]}${LEVELS[$((RANDOM % 4 + 4))]}"; else line+="${EDGE[$((RANDOM % 9))]}${LEVELS[0]}"; fi
+    done
+    printf '\033[7;1H\033[K%s\033[0m\033[8;1H\033[K%s\033[0m' "$line" "$line"
+}
+
+read_cava() {
+    cava -p "$CAVA_RAW" 2>/dev/null | python3 "$HOME/.local/bin/nowpanel_eq.py" "$BARS" 3
+}
+
+fake_eq() {
+    while :; do
+        st=$(command -v playerctl >/dev/null 2>&1 && playerctl status 2>/dev/null)
+        if [ "$st" = "Paused" ]; then n=$(( 1 + RANDOM % 2 )); d=0.45
+        else n=$(( 3 + RANDOM % 6 )); d=0.12; fi
+        render "$n"
+        sleep "$d"
+    done
+}
+
+if pactl info >/dev/null 2>&1 && command -v cava >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    read_cava || true
+fi
+fake_eq

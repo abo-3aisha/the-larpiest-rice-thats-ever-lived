@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# wifi-center — waybar Wi-Fi click app: a Toggle switch (not a button),
+# connect menu, and a QR code to share the currently connected network.
+notify() { command -v notify-send >/dev/null 2>&1 && notify-send -t 2500 -u low "Wi-Fi" "$1" 2>/dev/null; }
+
+wifi_share_qr() {
+    local ssid psk uri psk_line
+    ssid=$(nmcli -t -f IN-USE,SSID dev wifi 2>/dev/null | awk -F: '$1 == "*" { print $2; exit }')
+    if [ -z "$ssid" ]; then
+        notify "No network connected to share"
+        return
+    fi
+    if ! command -v qrencode >/dev/null 2>&1 || ! command -v foot >/dev/null 2>&1; then
+        notify "Install qrencode (and ensure foot) to share via QR"
+        return
+    fi
+    psk=$(timeout 4 nmcli -s --get-values 802-11-wireless-security.psk connection show "$ssid" 2>/dev/null)
+    if [ -n "$psk" ]; then
+        uri="WIFI:T:WPA;S:${ssid};P:${psk};;"
+        psk_line="Password: $psk"
+    else
+        uri="WIFI:T:nopass;S:${ssid};;"
+        psk_line="(password protected — QR without pass)"
+    fi
+    foot sh -c "printf '\033[38;2;232;158;40mShare Wi-Fi\033[0m\nSSID: $ssid\n$psk_line\n'; qrencode -t ANSIUTF8 -m 2 '$uri'; echo; read -p 'Press ENTER to close'" 2>/dev/null
+}
+
+radio=$(nmcli radio wifi 2>/dev/null)
+connected=$(nmcli -t -f IN-USE,SSID dev wifi 2>/dev/null | awk -F: '$1 == "*" { print $2; exit }')
+
+if [ "$radio" = "disabled" ]; then
+    menu=$(printf '%s\n' \
+        "󰅨  Wi-Fi: OFF — tap to turn ON" \
+        "󰤨  Connect to a network…")
+    sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Wi-Fi 󰖩 (OFF)" --lines 2)
+    case "$sel" in
+        *"ON"*) nmcli radio wifi on >/dev/null 2>&1; sleep 1; exec "$0" ;;
+        *"Connect"*) nmcli radio wifi on >/dev/null 2>&1; sleep 2; exec "$HOME/.local/bin/wifi-menu" ;;
+    esac
+    exit 0
+fi
+
+menu=$(printf '%s\n' \
+    "󰅩  Wi-Fi: ON — tap to turn OFF" \
+    "󰤨  Connect to a network…" \
+    "󰖡  QR: share this network")
+
+title="Wi-Fi 󰖩 — ${connected:-not connected}"
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$title" --lines 3)
+case "$sel" in
+    *"OFF"*) nmcli radio wifi off >/dev/null 2>&1; exec "$0" ;;
+    *"Connect"*) exec "$HOME/.local/bin/wifi-menu" ;;
+    *"QR: share"*) wifi_share_qr ;;
+esac
+exit 0

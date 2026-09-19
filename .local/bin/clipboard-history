@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# clipboard-history — browse the clipboard history and put a pick back on the
+# clipboard (copy then paste with Ctrl+V). Backed by cliphist (already running
+# via wl-paste --watch) + wofi. Bound to Super+C.
+set -u
+
+if ! command -v cliphist >/dev/null 2>&1; then
+    notify-send -t 4000 "Clipboard" "cliphist is not installed" 2>/dev/null
+    exit 1
+fi
+if ! command -v wl-copy >/dev/null 2>&1; then
+    notify-send -t 4000 "Clipboard" "wl-copy (wl-clipboard) is not installed" 2>/dev/null
+    exit 1
+fi
+
+CLEAR="[ clear history ]"
+menu=""
+for m in wofi rofi fuzzel bemenu dmenu; do
+    command -v "$m" >/dev/null 2>&1 && menu="$m" && break
+done
+[ -n "$menu" ] || { notify-send -t 4000 "Clipboard" "no menu app found" 2>/dev/null; exit 1; }
+
+list="$(cliphist list 2>/dev/null)"
+if [ -z "$list" ]; then
+    notify-send -t 3000 "Clipboard" "history is empty" 2>/dev/null
+    exit 0
+fi
+
+sel="$(printf '%s\n%s\n' "$list" "$CLEAR" | "$menu" --dmenu -i --prompt "Clipboard" 2>/dev/null)"
+[ -n "$sel" ] || exit 0
+
+if [ "$sel" = "$CLEAR" ]; then
+    cliphist wipe
+    notify-send -t 2500 "Clipboard" "history cleared" 2>/dev/null
+    exit 0
+fi
+
+# Restore the picked entry (text or image) to the clipboard.
+printf '%s\n' "$sel" | cliphist decode 2>/dev/null | wl-copy

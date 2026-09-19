@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# apply-wallpaper — cover-crop (no stretch) via awww (the /usr/bin successor to
+# swww; CachyOS/Extra package "awww", binaries awww + awww-daemon). Grows the
+# new wallpaper out from the bottom-right corner toward the top-left with a
+# smooth 2s fade at 144fps. Falls back to swww (older) or swaybg if neither
+# daemon exists. Ends with ONE theme call (palette.py --apply) re-skinning
+# waybar/swaync/wofi/hypr/foot/fish/fastfetch/cava/GTK. No competing scripts.
+conf="$HOME/.config/hypr/hyprpaper.conf"
+path=$(sed -n 's/^wallpaper *= *[^,]*,//p' "$conf" | head -1)
+[ -z "$path" ] && exit 0
+[ -f "$path" ] || exit 0
+
+# Video files are owned by mpvpaper; images/animated GIFs stay on awww.
+case "${path,,}" in
+    *.mp4|*.mkv|*.webm|*.mov|*.avi|*.m4v)
+        exec "$HOME/.local/bin/video-wallpaper" "$path"
+        ;;
+esac
+
+mon=$(hyprctl monitors 2>/dev/null | awk 'NR==1 && $1=="Monitor" {print $2}')
+mon="${mon:-eDP-1}"
+
+# Kill EVERY wallpaper daemon so no leftover renders stretch (incl. mpvpaper).
+killall hyprpaper swaybg wbg mpvpaper 2>/dev/null
+sleep 0.2
+
+if command -v awww >/dev/null 2>&1; then
+    mkdir -p "$HOME/.cache/awww"
+    awww query >/dev/null 2>&1 || (awww-daemon >/dev/null 2>&1 &)
+    sleep 0.4
+    awww img "$path" --resize crop -o "$mon" \
+        --transition-type grow --transition-pos bottom-right \
+        --transition-duration 1.2 --transition-fps 144 \
+        --transition-bezier "0.0,0.0,0.9,1.0"
+elif command -v swww >/dev/null 2>&1; then
+    swww-daemon >/dev/null 2>&1 &
+    sleep 0.4
+    swww img "$path" --resize fill --outputs "$mon" \
+        --transition-type outer --transition-pos 1.0 1.0 \
+        --transition-duration 2 --transition-fps 144 \
+        --transition-bezier 0.0,0.0,0.9,1.0
+elif command -v swaybg >/dev/null 2>&1; then
+    swaybg --mode fill --output "$mon" --image "$path" &
+else
+    notify-send "Wallpaper" "no awww/swww/swaybg found" 2>/dev/null
+fi
+
+# Single re-theme call: wal (if stale) + every generator + restarts waybar.
+python3 "$HOME/.config/hypr/themes/palette.py" --apply 2>/dev/null

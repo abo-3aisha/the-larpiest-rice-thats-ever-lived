@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Super+B: cycle power profile saver → balanced → performance (+ no-repeat wraps),
+# and notify which one is now activecars.  cycle-power
+set -u
+NS="notify-send -u low -t 3000"
+
+cur="$(powerprofilesctl get 2>/dev/null | tr 'A-Z' 'a-z')"
+
+case "$cur" in
+    power-saver)
+        powerprofilesctl set balanced
+        $NS "󰾅 Balanced" "Daily work balance · not always on battery"
+        ;;
+    balanced)
+        powerprofilesctl set performance
+        $NS "󰓅 Performance" "Max speed — gaming and heavy apps"
+        ;;
+    *)
+        powerprofilesctl set power-saver
+        $NS "󰌾 Power Saver" "Low battery usage — browsing and coding"
+        ;;
+esac

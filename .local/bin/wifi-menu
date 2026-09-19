@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+HIDDEN_ITEM="➕  Hidden network  󰥻"
+RESCAN_ITEM="↻  Rescan 󰥖"
+
+list=$( {
+    printf '%s\n' "$RESCAN_ITEM"
+    printf '%s\n' "$HIDDEN_ITEM"
+    nmcli -t -f SIGNAL,SECURITY,SSID dev wifi list --rescan yes 2>/dev/null \
+      | rev | cut -d: -f1 | rev | grep -v '^$' | sort -u
+} )
+
+sel=$(printf '%s\n' "$list" | wofi --dmenu --prompt "Wi-Fi 󰖩" --lines 15)
+[ -z "$sel" ] && exit 0
+
+if [ "$sel" = "$RESCAN_ITEM" ]; then
+    notify-send -t 2000 "Wi-Fi" "Scanning…" 2>/dev/null
+    nmcli device wifi rescan >/dev/null 2>&1
+    sleep 1
+    exec "$0"
+fi
+
+if [ "$sel" = "$HIDDEN_ITEM" ]; then
+    ssid=$(wofi --dmenu --prompt "SSID")
+    [ -z "$ssid" ] && exit 0
+    pw=$(wofi --password --dmenu --prompt "Password: $ssid")
+    nmcli dev wifi connect "$ssid" password "$pw" hidden yes 2>/dev/null \
+        && notify-send -t 2500 "Wi-Fi" "Connected: $ssid" \
+        || notify-send -t 3500 "Wi-Fi" "Failed to join $ssid"
+    exit 0
+fi
+
+if nmcli dev wifi connect "$sel" 2>/dev/null; then
+    notify-send -t 2500 "Wi-Fi" "Connected: $sel"
+else
+    pw=$(wofi --password --dmenu --prompt "Password: $sel")
+    nmcli dev wifi connect "$sel" password "$pw" 2>/dev/null \
+        && notify-send -t 2500 "Wi-Fi" "Connected: $sel"
+fi

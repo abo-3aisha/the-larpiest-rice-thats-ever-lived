@@ -1,0 +1,37 @@
+#!/bin/sh
+# vol-bar - swaync generic-slider (slider#volume) helper for the default sink.
+#   vol-bar get      -> percent as plain integer (NEVER empty: falls back to cache)
+#   vol-bar set 42   -> wpctl set-volume + cache
+cache="$HOME/.cache/vol-bar"
+[ -f "$cache" ] || echo 100 > "$cache"
+mode="${1:-get}"
+value="$2"
+
+get() {
+    raw="$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)"
+    if [ -n "$raw" ]; then
+        pct="$(printf '%s' "$raw" | awk '{printf "%.0f", $2*100}')"
+        case "$pct" in
+            '') cat "$cache" ;;
+            *[!0-9]*) cat "$cache" ;;
+            *) echo "$pct" > "$cache"; echo "$pct" ;;
+        esac
+    else
+        cat "$cache"
+    fi
+}
+
+set_vol() {
+    case "$value" in
+        ''|*[!0-9]*) exit 0 ;;
+    esac
+    [ "$value" -lt 0 ] && value=0
+    [ "$value" -gt 400 ] && value=400
+    wpctl set-volume @DEFAULT_AUDIO_SINK@ "${value}%" 2>/dev/null
+    echo "$value" > "$cache"
+}
+
+case "$mode" in
+    set) set_vol ;;
+    *) get ;;
+esac

@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+import socket, struct, sys, os, glob
+
+cmd = sys.argv[1]
+uid = os.getuid()
+sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+socks2 = []
+socks1 = []
+if sig:
+    socks2.append(f"/run/user/{uid}/hypr/{sig}/.socket2.sock")
+    socks1.append(f"/run/user/{uid}/hypr/{sig}/.socket.sock")
+socks2 += glob.glob(f"/run/user/{uid}/hypr/*/.socket2.sock")
+socks1 += glob.glob(f"/run/user/{uid}/hypr/*/.socket.sock")
+
+def send_one(path, payload):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(2)
+    s.connect(path)
+    s.sendall(payload)
+    buf = b""
+    try:
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    except socket.timeout:
+        pass
+    s.close()
+    return buf
+
+data = cmd.encode()
+for path in socks2:
+    if os.path.exists(path):
+        buf = send_one(path, struct.pack("<I", len(data)) + data)
+        if len(buf) >= 4:
+            n = struct.unpack("<I", buf[:4])[0]
+            print(buf[4:4 + n].decode(errors="replace").rstrip())
+        else:
+            print(buf.decode(errors="replace").rstrip())
+        sys.exit(0)
+
+for path in socks1:
+    if os.path.exists(path):
+        buf = send_one(path, data + b"\n")
+        if buf:
+            print(buf.decode(errors="replace").rstrip())
+            sys.exit(0)
+
+print("no hyprland command socket found", file=sys.stderr)
+sys.exit(1)

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Gaming Mode UX toggle. Saves every effect setting, zeroes them out,
+# and restores the exact previous values when turned off.
+STATE="$HOME/.cache/gaming_prev"
+NOTIFY="notify-send -u low -t 3500"
+
+g() { hyprctl getoption "$1" | awk -F': ' '/int/{print $2}' | head -1; }
+k() { hyprctl keyword "$1" "$2" >/dev/null; }
+
+save_prev() {
+    cat > "$STATE" <<EOF
+blur_enabled=$(g decoration:blur:enabled)
+animations=$(g animations:enabled)
+drop_shadow=$(g decoration:drop_shadow)
+rounding=$(g decoration:rounding)
+gaps_in=$(g general:gaps_in)
+gaps_out=$(g general:gaps_out)
+active_opacity=$(g decoration:active_opacity)
+inactive_opacity=$(g decoration:inactive_opacity)
+EOF
+}
+
+apply_gaming() {
+    k decoration:blur:enabled  0
+    k animations:enabled       0
+    k decoration:drop_shadow   0
+    k decoration:rounding      0
+    k general:gaps_in           lit("2")
+    k general:gaps_out          lit("4")
+    k decoration:active_opacity  1
+    k decoration:inactive_opacity 1
+}
+
+apply_prev() {
+    [ -f "$STATE" ] || return 1
+    . "$STATE"
+    k decoration:blur:enabled  "${blur_enabled:-1}"
+    k animations:enabled       "${animations:-1}"
+    k decoration:drop_shadow   "${drop_shadow:-1}"
+    k decoration:rounding      "${rounding:-0}"
+    k general:gaps_in          "${gaps_in:-0}"
+    k general:gaps_out         "${gaps_out:-0}"
+    k decoration:active_opacity   "${active_opacity:-1}"
+    k decoration:inactive_opacity "${inactive_opacity:-1}"
+}
+
+case "${1:-toggle}" in
+    on)
+        save_prev; apply_gaming
+        $NOTIFY "Gaming Mode 󰆍 ON" "Everything disabled for raw FPS"
+        ;;
+    off)
+        apply_prev && rm -f "$STATE"
+        $NOTIFY "Effects Restored 󰛐" "Blur · animations · shadows back"
+        ;;
+    toggle|*)
+        if [ -f "$STATE" ]; then
+            apply_prev && rm -f "$STATE"
+            $NOTIFY "Effects Restored 󰛐" "Blur · animations · shadows back"
+        else
+            save_prev; apply_gaming
+            $NOTIFY "Gaming Mode 󰆍 ON" "Everything disabled for raw FPS"
+        fi
+        ;;
+esac

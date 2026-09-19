@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# cycle-wallpaper — auto-rotation slideshow between ~/Pictures/Wallpapers.
+# Usage: cycle-wallpaper [start|stop|toggle] [interval_secs]
+#   Default interval: 600s (10 min). One smooth transition per flip (uses
+#   apply-wallpaper => awww grow-from-corner fade, cover-crop, no stretch).
+#   English notifications, plain text (no emoji).
+set -u
+DIR="$HOME/Pictures/Wallpapers"
+PIDF="$HOME/.cache/cycle-wallpaper.pid"
+AW="/home/abo3aisha/.local/bin/apply-wallpaper"
+NS="notify-send -u low -t 3000"
+
+die() { echo "cycle-wallpaper: $*" >&2; exit 1; }
+
+start() {
+    local interval="${1:-600}" n=0 f i
+    [ -f "$PIDF" ] && die "already running (pid $(cat "$PIDF"))"
+    local -a files=()
+    for f in "$DIR"/*.{jpg,jpeg,png}; do
+        [ -f "$f" ] && files+=("$f")
+    done
+    n="${#files[@]}"
+    [ "$n" -lt 2 ] && die "need at least 2 wallpapers in $DIR"
+    ( # subshell: loop guarded by its own pid file
+        echo "$$" > "$PIDF"
+        trap 'rm -f "$PIDF"' EXIT
+        i=0
+        while :; do
+            f="${files[$i]}"
+            "$AW" "$f" >/dev/null 2>&1
+            $NS "Wallpaper $((i+1))/$n" "$(basename "$f")"
+            sleep "$interval"
+            i=$(( (i + 1) % n ))
+        done
+    ) &
+    sleep 0.3
+    $NS "Wallpaper cycle started" "every ${interval}s · $n images"
+}
+
+stop() {
+    if [ -f "$PIDF" ]; then
+        kill "$(cat "$PIDF")" 2>/dev/null
+        rm -f "$PIDF"
+        $NS "Wallpaper cycle stopped"
+    else
+        die "nothing running"
+    fi
+}
+
+case "${1:-toggle}" in
+    start)  shift; start "${1:-600}" ;;
+    stop)   shift; stop ;;
+    toggle) [ -f "$PIDF" ] && stop || start "${2:-600}" ;;
+    *)      die "usage: cycle-wallpaper [start|stop|toggle] [interval_secs]" ;;
+esac

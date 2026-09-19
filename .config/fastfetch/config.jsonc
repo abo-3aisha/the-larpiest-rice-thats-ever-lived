@@ -1,0 +1,36 @@
+{
+    "logo": {
+        "type": "builtin",
+        "source": "arch",
+        "color": {
+            "1": "#6fdbfe",
+            "2": "#ffe9f1",
+            "3": "#6fdbfe"
+        }
+    },
+    "display": {
+        "separator": "  ",
+        "color": {
+            "keys": "#6fdbfe"
+        }
+    },
+    "modules": [
+        "title",
+        "separator",
+        "os",
+        "host",
+        "kernel",
+        "uptime",
+        "packages",
+        "shell",
+        "resolution",
+        "de",
+        "wm",
+        "terminal",
+        "cpu",
+        "gpu",
+        "memory",
+        "disk",
+        "colors"
+    ]
+}

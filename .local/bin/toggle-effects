@@ -1,0 +1,42 @@
+kk#!/bin/bash
+
+GAMING_FLAG="$HOME/.config/kwin-gaming-mode"
+KWINRC="$HOME/.config/kwinrc"
+BACKUP="$HOME/.config/kwinrc.backup"
+
+if [ -f "$GAMING_FLAG" ]; then
+    # RESTORE MODE
+    if [ -f "$BACKUP" ]; then
+        cp "$BACKUP" "$KWINRC"
+    fi
+    rm -f "$GAMING_FLAG"
+    notify-send "Plasma" "Effects ON"
+else
+    # GAME MODE
+    cp "$KWINRC" "$BACKUP"
+    touch "$GAMING_FLAG"
+
+    kwriteconfig6 --file kwinrc --group Plugins --key blurEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key slideEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key cubeEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key desktopgridEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key presentwindowsEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key overviewEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_translucency false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_dialogparent false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_fadingpopups false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_maximize false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_minimize false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_morphingpopups false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_scale false
+    kwriteconfig6 --file kwinrc --group Plugins --key kwin4_effect_squash false
+    kwriteconfig6 --file kwinrc --group Plugins --key wobblywindowsEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key magiclampEnabled false
+    kwriteconfig6 --file kwinrc --group Plugins --key slidingpopupsEnabled false
+
+    kwriteconfig6 --file kwinrc --group Compositing --key AnimationSpeed 0
+
+    notify-send "Plasma" "Effects OFF - Game Mode"
+fi
+
+qdbus org.kde.KWin /KWin reconfigure

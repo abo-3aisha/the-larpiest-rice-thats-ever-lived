@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+vm=$(awk -v v="$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | cut -d' ' -f2)" 'BEGIN{printf "%.0f", v*100}')
+mm=$(awk -v v="$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | cut -d' ' -f2)" 'BEGIN{printf "%.0f", v*100}')
+
+if command -v yad >/dev/null 2>&1; then
+    out=$(yad --form --width=380 --title="Volume" \
+        --field="Volume:SCL" "$vm min=0 max=150 step=2" \
+        --field="Microphone:SCL" "$mm min=0 max=150 step=2" \
+        --button="Cancel:1" --button="OK:0" 2>/dev/null) || exit 0
+    v=$(echo "$out" | cut -d'|' -f1 | cut -d. -f1)
+    m=$(echo "$out" | cut -d'|' -f2 | cut -d. -f1)
+    [ "$v" != "$vm" ] && wpctl set-volume @DEFAULT_AUDIO_SINK@ "$v"% 2>/dev/null
+    [ "$m" != "$mm" ] && wpctl set-volume @DEFAULT_AUDIO_SOURCE@ "$m"% 2>/dev/null
+elif command -v zenity >/dev/null 2>&1; then
+    v=$(zenity --scale --title="Volume" --text="Speaker volume" --min-value=0 --max-value=150 --step=2 --value="$vm" 2>/dev/null) || exit 0
+    wpctl set-volume @DEFAULT_AUDIO_SINK@ "$v"% 2>/dev/null
+    m=$(zenity --scale --title="Microphone" --text="Microphone volume" --min-value=0 --max-value=150 --step=2 --value="$mm" 2>/dev/null) || exit 0
+    wpctl set-volume @DEFAULT_AUDIO_SOURCE@ "$m"% 2>/dev/null
+else
+    notify-send -t 3000 "Volume: $vm%  |  Mic: $mm%"
+fi

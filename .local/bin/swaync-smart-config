@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+# swaync-smart-config — builds swaync config.json from config.json.tpl.
+# Panel tiles are REAL state widgets (type=toggle): swiftnc asks each their
+# update-command every time the control center opens, so Wi-Fi/Bluetooth/Night
+# always reflect the true on/off, and the active tile is filled with the
+# wallpaper accent (Android quick-settings style).
+import json
+import os
+import pathlib
+
+HOME = os.path.expanduser("~")
+TPL = pathlib.Path(HOME + "/.config/swaync/config.json.tpl")
+OUT = pathlib.Path(HOME + "/.config/swaync/config.json")
+
+
+def main():
+    text = TPL.read_text()
+    json.loads(text)  # validate before touching the live file
+    try:
+        old = OUT.read_text()
+    except FileNotFoundError:
+        old = ""
+    if text != old:
+        OUT.write_text(text)
+
+
+if __name__ == "__main__":
+    main()

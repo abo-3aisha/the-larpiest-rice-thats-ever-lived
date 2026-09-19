@@ -1,0 +1,6 @@
+[Desktop Entry]
+Exec=/home/abo3aisha/.config/fix-audio.sh
+Icon=text-x-script
+Name=fix-audio.sh
+Type=Application
+X-KDE-AutostartScript=true

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# kbd-diagnose - capture what the Acer Fn brightness/backlight keys really emit.
+#
+# Run:  sudo kbd-diagnose
+# During the ~25s capture window press these ONE AT A TIME, with a small pause:
+#   1) Fn + F9      (keyboard backlight down)
+#   2) Fn + F10     (keyboard backlight up)
+#   3) your SCREEN-brightness-down key
+#   4) your SCREEN-brightness-up key
+#
+# Results are written to your home dir: kbd-diagnose.txt
+set -u
+
+U="${SUDO_USER:-abo3aisha}"
+HOME_DIR="$(getent passwd "$U" 2>/dev/null | cut -d: -f6)"
+[ -n "$HOME_DIR" ] || HOME_DIR="/home/$U"
+OUT="$HOME_DIR/kbd-diagnose.txt"
+
+{
+    echo "### date: $(date)"
+    echo
+    echo "### /etc/keyd (keyd could be remapping the Fn keys)"
+    ls -la /etc/keyd/ 2>&1
+    for f in /etc/keyd/*.conf; do [ -f "$f" ] && { echo "--- $f ---"; cat "$f"; }; done
+    echo
+    echo "### installed hwdb (/etc/udev/hwdb.d)"
+    ls -la /etc/udev/hwdb.d/ 2>&1
+    echo "--- 70-acer-nitro-an515-57-kbd.hwdb ---"
+    cat /etc/udev/hwdb.d/70-acer-nitro-an515-57-kbd.hwdb 2>&1
+    echo
+    echo "### udevadm info event4 (KEYBOARD_KEY* applied)"
+    udevadm info /sys/class/input/event4 2>&1 | grep -i "KEYBOARD_KEY\|ID_INPUT_KEYBOARD"
+    echo
+    echo "### dmesg atkbd"
+    dmesg 2>/dev/null | grep -i atkbd | tail -20
+    echo
+    echo "### WMI gaming LED sysfs (if any)"
+    find /sys -maxdepth 4 -iname '*gaming*led*' -o -maxdepth 4 -iname '*kbd*led*' 2>/dev/null | head
+    echo
+    echo "### keyd service"
+    systemctl is-active keyd 2>&1
+    echo
+    echo "### ================ EVENTS - press the 4 keys now ================"
+} > "$OUT" 2>&1
+
+if command -v libinput >/dev/null 2>&1; then
+    timeout 25 libinput debug-events >> "$OUT" 2>&1
+elif command -v evtest >/dev/null 2>&1; then
+    timeout 25 evtest /dev/input/event4 >> "$OUT" 2>&1
+else
+    echo "neither libinput nor evtest installed" >> "$OUT"
+fi
+
+echo "=== capture finished ===" >> "$OUT"
+chown "$U":"$U" "$OUT" 2>/dev/null
+chmod 644 "$OUT" 2>/dev/null
+echo "Saved to $OUT - tell Khalil it's ready."

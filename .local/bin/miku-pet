@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+# miku-pet - Hatsune Miku desktop pet (GTK3, transparent, floating on workspace 1).
+# Animated (idle loop / bob), speech bubble, draggable, sound on greet/say.
+# CLI:
+#   miku-pet                     run the pet
+#   miku-pet say <text> [secs]   speech bubble (English only)
+#   miku-pet set-frame N         use shimeji frame N (1..55)
+#   miku-pet set-frame MP K      use MikuPet idle strip frame K (1..10), animate the strip
+#   miku-pet loop A B            animate shimeji frames A..B in a loop
+#   miku-pet sheet               rebuild + open the labeled contact sheet
+#   miku-pet quit
+import math, os, re, subprocess, sys, time, wave, struct
+
+HOME = os.path.expanduser("~")
+ASSETS = HOME + "/.local/share/miku-pet/frames"
+ALT = HOME + "/.local/share/miku-pet/alt"
+CACHE = HOME + "/.cache/miku-pet"
+os.makedirs(CACHE, exist_ok=True)
+FIFO = CACHE + "/cmd"
+POSFILE = CACHE + "/pos"
+FRAME_FILE = CACHE + "/frame"
+SHEET = CACHE + "/sheet.png"
+SND = CACHE + "/ding.wav"
+LOG = CACHE + "/log"
+
+SCALE = 2.5
+SPRITE_W = int(128 * SCALE)
+SPRITE_H = int(128 * SCALE)
+BUBBLE_ZONE = 92
+WIN_W = SPRITE_W + 16
+WIN_H = BUBBLE_ZONE + SPRITE_H + 2
+MARGIN = 32
+MP_STRIP = ALT + "/mikupet-idle.png"
+MP_FRAMES = 10
+
+
+def log(msg):
+    try:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%H:%M:%S ") + str(msg) + "\n")
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------- selection
+def read_spec():
+    try:
+        s = open(FRAME_FILE).read().strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    return "shime27"
+
+
+def write_spec(spec):
+    open(FRAME_FILE, "w").write(spec)
+
+
+def resolve_frames(spec):
+    """Return list of PIL-compatible source paths; shime -> [path], mp-idle -> strip frames."""
+    spec = spec.strip()
+    if spec == "shime":
+        spec = "shime27"
+    m = re.match(r"^shime(\d+)$", spec)
+    if m:
+        p = os.path.join(ASSETS, "shime%d.png" % int(m.group(1)))
+        if os.path.exists(p):
+            return [p]
+    m = re.match(r"^mp-?i(\d+)$", spec.lower())
+    if m or spec.lower().startswith("mp "):
+        return ["MPSTRIP"]  # special marker
+    m2 = re.match(r"^loop\s+(\d+)\s+(\d+)$", spec.lower())
+    if m2:
+        a, b = int(m2.group(1)), int(m2.group(2))
+        out = []
+        for n in list(range(a, b + 1)) * 2:
+            p = os.path.join(ASSETS, "shime%d.png" % n)
+            if os.path.exists(p):
+                out.append(p)
+        return out or None
+    return None
+
+
+# ----------------------------------------------------------------- clips
+def ensure_sound():
+    try:
+        if os.path.exists(SND):
+            return
+        sr = 44100
+        notes = [523.25, 659.25, 783.99, 1046.5]  # C5 E5 G5 C6
+        t = 0
+        data = bytearray()
+        dur = 0.16
+        for i, f in enumerate(notes):
+            n = int(sr * dur)
+            for k in range(n):
+                env = min(1.0, k / (sr * 0.005)) * (1.0 - k / n)
+                v = 0.55 * env * math.sin(2 * math.pi * f * k / sr)
+                data += struct.pack("<h", int(v * 32767))
+            t += n
+        wf = wave.open(SND, "wb")
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(bytes(data))
+        wf.close()
+        log("sound generated")
+    except Exception as e:
+        log("sound ERROR %r" % e)
+
+
+def play_sound():
+    try:
+        play = (["mpv", "--no-video", "--volume=55", "--really-quiet", SND]
+                if shutil_() else ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", SND])
+    except Exception:
+        return
+    try:
+        subprocess.Popen(play, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def shutil_():
+    try:
+        r = subprocess.run(["which", "mpv"], capture_output=True, text=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------- sheet
+def build_sheet():
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception as e:
+        log("sheet no PIL %r" % e)
+        return False
+    CEL = 96
+    cols = 8
+    items = []
+    import glob
+    for f in sorted(glob.glob(ASSETS + "/shime*.png"),
+                    key=lambda p: int(os.path.basename(p)[5:-4])):
+        im = Image.open(f).convert("RGBA")
+        im.thumbnail((CEL, CEL))
+        items.append((os.path.basename(f)[5:-4], im))
+    mp = Image.open(MP_STRIP).convert("RGBA")
+    w = mp.width // 10
+    for i in range(10):
+        items.append(("MP-i%d" % i, mp.crop((i * w, 0, (i + 1) * w, mp.height)).resize((CEL, CEL))))
+    rows = (len(items) + cols - 1) // cols
+    sheet = Image.new("RGBA", (cols * CEL + 46, rows * CEL + 26), (16, 16, 20, 255))
+    d = ImageDraw.Draw(sheet)
+    font = None
+    for fp in ["/usr/share/fonts/TTF/DejaVuSans.ttf",
+               "/run/host/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"]:
+        try:
+            font = ImageFont.truetype(fp, 13)
+            break
+        except Exception:
+            pass
+    if font is None:
+        font = ImageFont.load_default()
+    for i, (label, im) in enumerate(items):
+        r, c = divmod(i, cols)
+        x, y = 42 + c * CEL, 8 + r * CEL
+        sheet.alpha_composite(im, (x, y))
+        d.rectangle([x, y, x + CEL, y + CEL], outline=(90, 90, 100))
+        d.text((x + CEL - 26, y + 5), str(i + 1), fill=(255, 255, 255), font=font)
+        d.text((x + 2, y + CEL + 1), label, fill=(235, 222, 152), font=font)
+    d.text((4, 12), "Pick a white box number  (1-55 shimeji)  (56-65 MikuPet idle strip)",
+           fill=(120, 160, 255), font=font)
+    sheet.convert("RGB").save(SHEET)
+    log("sheet built")
+    return True
+
+
+def sheet_command():
+    if build_sheet():
+        subprocess.Popen(["xdg-open", SHEET],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# ---------------------------------------------------------------- launcher
+def main():
+    args = sys.argv[1:]
+    if not args:
+        run_pet()
+        return
+    cmd = args[0]
+    if cmd == "restart":
+        subprocess.run(["pkill", "-f", "miku-pet"], check=False)
+        time.sleep(0.4)
+        subprocess.Popen([sys.executable, os.path.realpath(__file__)],
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        print("restarted miku-pet")
+    elif cmd == "stop":
+        subprocess.run(["pkill", "-f", "miku-pet"], check=False)
+        print("stopped")
+    elif cmd == "say":
+        fifo_write("say " + " ".join(args[1:]))
+    elif cmd == "quit":
+        fifo_write("quit")
+    elif cmd == "set-frame":
+        # miku-pet set-frame N   |   miku-pet set-frame MP K
+        if len(args) >= 3 and args[1].upper() == "MP":
+            write_spec("mp-i%d" % int(args[2]))
+        else:
+            n = int(args[1])
+            src = os.path.join(ASSETS, "shime%d.png" % n)
+            if os.path.exists(src):
+                write_spec("shime%d" % n)
+            else:
+                print("no shime frame:", n); sys.exit(1)
+        fifo_write("frame")
+        print("frame set")
+    elif cmd == "use":
+        # miku-pet use <sheet number>: 1..55 = shime N, 56..65 = MikuPet idle strip
+        n = int(args[1])
+        if 56 <= n <= 65:
+            write_spec("mp-i%d" % (n - 56))
+        elif 1 <= n <= 55:
+            write_spec("shime%d" % n)
+        else:
+            print("bad number"); sys.exit(1)
+        fifo_write("frame")
+        print("now:", read_spec())
+    elif cmd == "loop":
+        a, b = int(args[1]), int(args[2])
+        write_spec("loop %d %d" % (a, b))
+        fifo_write("frame")
+        print("loop %s..%s" % (a, b))
+    elif cmd == "sheet":
+        sheet_command()
+    else:
+        print(__doc__)
+
+
+# ------------------------------------------------------------------- fifo
+def kill_other_instances():
+    """Only one pet window allowed: kill any other miku-pet on the machine."""
+    import signal
+    try:
+        me = os.getpid()
+        out = subprocess.run(["pgrep", "-f", "miku-pet"],
+                             capture_output=True, text=True, timeout=5).stdout.split()
+        for p in out:
+            if p.isdigit() and int(p) != me:
+                try:
+                    os.kill(int(p), signal.SIGTERM)
+                    log("killed stale instance %s" % p)
+                except Exception:
+                    pass
+    except Exception as e:
+        log("kill_others: %r" % e)
+
+
+def fifo_write(text):
+    try:
+        if not os.path.exists(FIFO):
+            os.mkfifo(FIFO)
+        fd = os.open(FIFO, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(fd, (text + "\n").encode())
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def run_pet():
+    kill_other_instances()
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk, Gdk, GLib, GdkPixbuf  # noqa: F401
+    import cairo
+
+    GLib.set_prgname("miku-pet")
+    ensure_sound()
+
+    class Pet(Gtk.Window):
+        def __init__(self):
+            super().__init__()
+            self.set_title("miku-pet")
+            self.set_decorated(False)
+            self.set_skip_taskbar_hint(True)
+            self.set_skip_pager_hint(True)
+            self.set_keep_above(True)
+            self.set_accept_focus(False)
+            self.set_can_focus(False)
+            self.set_resizable(False)
+            self.set_app_paintable(True)
+            try:
+                self.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+                visual = self.get_screen().get_rgba_visual()
+                if visual:
+                    self.set_visual(visual)
+            except Exception:
+                pass
+
+            self.load_css()
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            self.add(box)
+
+            # speech bubble (fixed reserved zone so layout never shifts)
+            self.bubble = Gtk.Label()
+            self.bubble.get_style_context().add_class("miku-bubble")
+            self.bubble.set_line_wrap(True)
+            self.bubble.set_max_width_chars(30)
+            self.bubble.set_halign(Gtk.Align.START)
+            self.bubble.set_valign(Gtk.Align.START)
+            self.rev = Gtk.Revealer()
+            self.rev.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+            self.rev.set_transition_duration(200)
+            self.rev.add(self.bubble)
+            zone = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            zone.set_size_request(-1, BUBBLE_ZONE)
+            zone.pack_start(self.rev, False, False, 0)
+            box.pack_start(zone, False, False, 0)
+
+            # sprite area
+            self.da = Gtk.DrawingArea()
+            self.da.set_size_request(WIN_W, SPRITE_H + 2)
+            self.da.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
+                               Gdk.EventMask.BUTTON_RELEASE_MASK |
+                               Gdk.EventMask.POINTER_MOTION_MASK)
+            self.da.connect("draw", self.on_draw)
+            self.da.connect("button-press-event", self.on_press)
+            self.da.connect("button-release-event", self.on_release)
+            self.da.connect("motion-notify-event", self.on_motion)
+            box.pack_start(self.da, True, True, 0)
+
+            self.frames = []       # list of (pixbuf, surface)
+            self.idx = 0
+            self.acc = 0.0
+            self.loop_delay = 0.3 if self.is_strip() else None
+            self.bob = 0
+            self.sway = 0
+            self.tilt = 0.0
+            self.sq_y = 1.0
+            self.sq_x = 1.0
+            self.energy = 0.0       # motion multiplier (0..2+)
+            self.energy_t = 1.0     # target
+            self.bob_t0 = time.time()
+            self.load_loop()
+
+            self.dragging = False
+            self.offx = self.offy = 0
+            self.x, self.y = self.read_pos() or (self.default_x(), self.default_y())
+
+            self.set_size_request(WIN_W, WIN_H)
+            self.move(self.x, self.y)
+            self.show_all()
+            self.rev.set_reveal_child(False)
+
+            self.bubble_timer = None
+            GLib.timeout_add(30, self.animate)
+            GLib.timeout_add(250, self.poll_fifo)
+            self.say("Hello! I am Miku. Drag me anywhere.")
+
+        # ------------------------------------------------------ css
+        def load_css(self):
+            css = b"""
+            .miku-bubble {
+                background-color: rgba(18,18,22,0.9);
+                border-radius: 12px;
+                padding: 8px 12px;
+                color: #ebde98;
+                font-size: 11pt;
+                font-weight: 600;
+                font-family: "JetBrainsMono Nerd Font";
+            }
+            """
+            try:
+                prov = Gtk.CssProvider()
+                prov.load_from_data(css)
+                Gtk.StyleContext.add_provider_for_screen(
+                    self.get_screen(), prov,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            except Exception:
+                pass
+
+        # -------------------------------------------------- sprite loop
+        def is_strip(self):
+            spec = read_spec().lower()
+            return spec.startswith("mp")
+
+        def load_loop(self):
+            self.frames = []
+            self.idx = 0
+            try:
+                spec = read_spec()
+                log("load_loop spec=%s" % spec)
+                if self.is_strip():
+                    mp = GdkPixbuf.Pixbuf.new_from_file(MP_STRIP)
+                    fw = mp.get_width() // MP_FRAMES
+                    fh = mp.get_height()
+                    for i in range(MP_FRAMES):
+                        p = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, fw, fh)
+                        mp.copy_area(i * fw, 0, fw, fh, p, 0, 0)
+                        p = p.scale_simple(SPRITE_W, SPRITE_H,
+                                           GdkPixbuf.InterpType.BILINEAR)
+                        s = Gdk.cairo_surface_create_from_pixbuf(p, 1, None)
+                        self.frames.append((p, s))
+                    self.loop_delay = 0.28
+                else:
+                    paths = resolve_frames(spec) or []
+                    for pth in paths:
+                        pb = GdkPixbuf.Pixbuf.new_from_file(pth)
+                        pb = pb.scale_simple(SPRITE_W, SPRITE_H,
+                                             GdkPixbuf.InterpType.BILINEAR)
+                        s = Gdk.cairo_surface_create_from_pixbuf(pb, 1, None)
+                        self.frames.append((pb, s))
+                    self.loop_delay = 0.35 if len(self.frames) > 1 else None
+                log("loaded %d frames delay=%s" % (len(self.frames), self.loop_delay))
+            except Exception as e:
+                log("load_loop ERROR %r" % e)
+            self.da.queue_draw()
+
+        # -------------------------------------------------- geometry
+        def mon_geo(self):
+            try:
+                return self.get_screen().get_monitor_geometry(0)
+            except Exception:
+                return None
+
+        def default_x(self):
+            mon = self.mon_geo()
+            return mon.x + mon.width - WIN_W - MARGIN if mon else 0
+
+        def default_y(self):
+            mon = self.mon_geo()
+            return mon.y + mon.height - WIN_H - MARGIN + 10 if mon else 0
+
+        def read_pos(self):
+            try:
+                parts = open(POSFILE).read().split()
+                return int(parts[0]), int(parts[1])
+            except Exception:
+                return None
+
+        def save_pos(self):
+            try:
+                open(POSFILE, "w").write("%d %d" % (self.x, self.y))
+            except Exception:
+                pass
+
+        def reset_position(self):
+            self.x, self.y = self.default_x(), self.default_y()
+            self.move(self.x, self.y)
+            self.save_pos()
+
+        # ------------------------------------------------------ draw
+        def on_draw(self, widget, cr):
+            cr.set_operator(cairo.OPERATOR_SOURCE)
+            cr.set_source_rgba(0, 0, 0, 0)
+            cr.paint()
+            cr.set_operator(cairo.OPERATOR_OVER)
+            surf = self.frames[self.idx][1] if self.frames else None
+            if surf:
+                w = widget.get_allocation().width
+                h = widget.get_allocation().height
+                sw = surf.get_width()
+                sh = surf.get_height()
+                x = int((w - sw) / 2 + self.sway)
+                y = h - sh - 2 + self.bob
+                cx = x + sw / 2
+                hipy = y + sh * 0.62
+                cr.save()
+                cr.translate(cx, hipy)
+                cr.rotate(self.tilt)
+                cr.scale(self.sq_x, self.sq_y)
+                cr.translate(-cx, -hipy)
+                cr.set_source_surface(surf, x, y)
+                cr.paint()
+                cr.restore()
+            else:
+                cr.set_source_rgba(0.4, 0.1, 0.6, 0.6)
+                cr.rectangle(2, 2, 44, 44)
+                cr.fill()
+
+        def animate(self):
+            # energy moves toward its target (talking / party boost idle)
+            self.energy += 0.04 * (self.energy_t - self.energy)
+            e = self.energy
+            t = time.time() - self.bob_t0
+            tw = 2 * math.pi * t
+            if len(self.frames) > 1:
+                self.acc += 0.03
+                if self.acc >= self.loop_delay:
+                    self.acc = 0.0
+                    self.idx = (self.idx + 1) % len(self.frames)
+            # quiet standing default; lively dance while talking/party
+            self.bob = int((1.5 + 4.0 * e) * math.sin(tw / 2.4))
+            self.sway = int((1.0 + 3.0 * e) * math.sin(tw / 1.2 + 0.6))
+            self.tilt = (0.025 + 0.06 * e) * math.sin(tw / 3.0 + 1.1)
+            sq = (0.010 + 0.04 * e) * math.sin(tw / 1.5)
+            self.sq_y = 1.0 + sq
+            self.sq_x = 1.0 - sq
+            self.da.queue_draw()
+            return True
+
+        # ---------------------------------------------------- events
+        def on_press(self, w, ev):
+            if ev.button == 1:
+                self.dragging = True
+                self.offx = int(ev.x_root) - self.x
+                self.offy = int(ev.y_root) - self.y
+            elif ev.button == 3:
+                self.context_menu()
+            return True
+
+        def on_motion(self, w, ev):
+            if self.dragging:
+                self.x = int(ev.x_root) - self.offx
+                self.y = int(ev.y_root) - self.offy
+                self.move(self.x, self.y)
+            return True
+
+        def on_release(self, w, ev):
+            if self.dragging:
+                self.dragging = False
+                self.save_pos()
+            return True
+
+        # ------------------------------------------------------ menu
+        def party(self):
+            self.energy_t = 2.2
+            play_sound()
+            GLib.timeout_add(4000, self._party_end)
+
+        def _party_end(self):
+            self.energy_t = 1.0
+            return False
+
+        def context_menu(self):
+            m = Gtk.Menu()
+            hi = Gtk.MenuItem("Hi!")
+            hi.connect("activate", lambda *a: self.say(self.greet()))
+            m.append(hi)
+            pa = Gtk.MenuItem("Party!")
+            pa.connect("activate", lambda *a: self.party())
+            m.append(pa)
+            rp = Gtk.MenuItem("Reset position")
+            rp.connect("activate", lambda *a: self.reset_position())
+            m.append(rp)
+            q = Gtk.MenuItem("Goodbye")
+            q.connect("activate", lambda *a: self.destroy())
+            m.append(q)
+            try:
+                m.show_all()
+                m.popup_at_pointer(None)
+            except Exception:
+                pass
+
+        def greet(self):
+            return "Hello! I am Miku, your desktop companion."
+
+        # ---------------------------------------------------- speech
+        def say(self, text, secs=4, ding=True):
+            self.energy_t = 1.5
+            GLib.timeout_add(secs * 1000 + 400, self._talk_end)
+            GLib.idle_add(self._say, text, secs, ding)
+
+        def _talk_end(self):
+            self.energy_t = 1.0
+            return False
+
+        def _say(self, text, secs, ding):
+            esc = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            self.bubble.set_markup(esc)
+            self.rev.set_reveal_child(True)
+            if ding:
+                try:
+                    play_sound()
+                except Exception:
+                    pass
+            if self.bubble_timer:
+                GLib.source_remove(self.bubble_timer)
+            self.bubble_timer = GLib.timeout_add(int(secs * 1000), self._hide_bubble)
+            return False
+
+        def _hide_bubble(self):
+            self.rev.set_reveal_child(False)
+            self.bubble_timer = None
+            return False
+
+        # ------------------------------------------------------ fifo
+        def poll_fifo(self):
+            try:
+                data = os.read(read_fd, 65536)
+                for line in data.decode().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line == "quit":
+                        self.destroy()
+                    elif line == "frame":
+                        self.load_loop()
+                    elif line.startswith("say "):
+                        rest = line[4:].strip()
+                        secs = 4
+                        mm = re.match(r"^(.*?)\s+(\d+)$", rest)
+                        if mm and 1 <= int(mm.group(2)) <= 30:
+                            rest, secs = mm.group(1), int(mm.group(2))
+                        self.say(rest, secs)
+            except (BlockingIOError, OSError):
+                pass
+            return True
+
+    Gtk.init(None)
+    if os.path.exists(FIFO):
+        os.unlink(FIFO)
+    os.mkfifo(FIFO)
+    read_fd = os.open(FIFO, os.O_RDONLY | os.O_NONBLOCK)
+    pet = Pet()
+    pet.show_all()
+    play_sound()
+    pet.connect("destroy", Gtk.main_quit)
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()

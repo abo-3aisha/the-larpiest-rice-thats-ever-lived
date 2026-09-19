@@ -1,0 +1,9 @@
+#!/bin/sh
+# Wait for the desktop wallpaper and panels to fully draw
+sleep 4
+
+# Dynamically pull the correct Wayland display environment
+export WAYLAND_DISPLAY=$(ls -1 $XDG_RUNTIME_DIR/wayland-* 2>/dev/null | head -n 1 | xargs basename)
+
+# Launch Kitty safely, let it map its graphics, then slide CAVA inside it
+/usr/bin/kitty --class "desktop-cava" -o background_opacity=0.0 -o background_blur=0 -o window_margin_width=0 -o confirm_os_window_close=0 sh -c "sleep 0.3 && cava" &

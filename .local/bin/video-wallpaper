@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# video-wallpaper — play a video as the desktop background with mpvpaper, and
+# keep the ONE theme engine (palette.py) in sync by theming from a sampled
+# frame of the video. Usage: video-wallpaper /path/to/video.mp4
+set -u
+
+video="${1:-}"
+if [ -z "$video" ]; then
+    notify-send -t 4000 "Video wallpaper" "no video given" 2>/dev/null
+    exit 1
+fi
+video="$(readlink -f -- "$video" 2>/dev/null || printf '%s' "$video")"
+if [ ! -f "$video" ]; then
+    notify-send -t 4000 "Video wallpaper" "not found: $video" 2>/dev/null
+    exit 1
+fi
+if ! command -v mpvpaper >/dev/null 2>&1; then
+    notify-send -t 4000 "Video wallpaper" "mpvpaper not installed" 2>/dev/null
+    exit 1
+fi
+
+CONF="$HOME/.config/hypr/hyprpaper.conf"
+CACHE="$HOME/.cache/video-wallpaper"
+mkdir -p "$CACHE"
+
+mon=$(hyprctl monitors 2>/dev/null | awk 'NR==1 && $1=="Monitor" {print $2}')
+mon="${mon:-eDP-1}"
+
+# Only one background daemon may own the output at a time.
+killall hyprpaper swaybg wbg mpvpaper 2>/dev/null
+pkill -x awww-daemon 2>/dev/null
+sleep 0.3
+
+# Remember the choice so apply-wallpaper restores video on next boot.
+printf 'preload = %s\nwallpaper = %s,%s\n' "$video" "$mon" "$video" > "$CONF"
+
+# Stable representative frame -> theme colors (avoids wal-on-video issues).
+frame="$CACHE/frame.png"
+if command -v ffmpeg >/dev/null 2>&1; then
+    ffmpeg -y -v error -i "$video" -frames:v 1 -vf "scale=1920:-2" "$frame" >/dev/null 2>&1
+fi
+
+# mpvpaper: fork to background, auto-pause when hidden, muted, looping.
+mpvpaper -f -p -a FULL -o "no-audio --loop-playlist --hwdec=auto-safe" "$mon" "$video" >/dev/null 2>&1
+sleep 0.5
+
+# Single re-theme call from the sampled frame (fallback: the video itself).
+if [ -f "$frame" ]; then
+    python3 "$HOME/.config/hypr/themes/palette.py" --apply --wall "$frame" >/dev/null 2>&1
+else
+    python3 "$HOME/.config/hypr/themes/palette.py" --apply --wall "$video" >/dev/null 2>&1
+fi
+
+notify-send -t 2500 "Wallpaper" "Video: $(basename "$video")" 2>/dev/null

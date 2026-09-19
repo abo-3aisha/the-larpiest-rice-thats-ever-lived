@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Force high sustained iGPU clocks on the Intel UHD (card1).
+# The stock RP1 (sustained) is 450MHz while RP0 (burst) is 1450MHz,
+# so Minecraft/Sodium only ever sees ~450MHz => ~45fps.
+# Usage: sudo igpu-boost [on|off]
+# "on"  -> pin min 1200 / max+boost 1450  (AC power, plays hard)
+# "off" -> restore driver defaults
+
+CARD=/sys/class/drm/card1
+MIN=1200
+MAX=1450
+
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+    echo "run with sudo" >&2
+    exit 1
+fi
+
+case "${1:-on}" in
+  on)
+    echo "igpu: forcing sustained clock up (min=$MIN max=$MAX boost=$MAX)"
+    echo "$MIN" > "$CARD/gt_min_freq_mhz"
+    echo "$MAX" > "$CARD/gt_max_freq_mhz"
+    echo "$MAX" > "$CARD/gt_boost_freq_mhz"
+    ;;
+  off)
+    echo "igpu: restoring defaults (min=350 max=1450 boost=1450)"
+    echo 350  > "$CARD/gt_min_freq_mhz"
+    echo 1450 > "$CARD/gt_max_freq_mhz"
+    echo 1450 > "$CARD/gt_boost_freq_mhz"
+    ;;
+  *)
+    echo "usage: $0 [on|off]" >&2
+    exit 2
+    ;;
+esac
+
+echo "min=$(cat $CARD/gt_min_freq_mhz) max=$(cat $CARD/gt_max_freq_mhz) boost=$(cat $CARD/gt_boost_freq_mhz) cur=$(cat $CARD/gt_cur_freq_mhz)"

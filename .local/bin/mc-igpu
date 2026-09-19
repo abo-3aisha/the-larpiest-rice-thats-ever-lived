@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Force Minecraft/TLauncher to render on the INTEL iGPU only.
+# eDP-1 (internal panel) is wired to card1=Intel, so PRIME/offload
+# (mc-wayland) causes reverse-PRIME copyback -> lag/stutter. This
+# wrapper keeps both GL (DRI_PRIME=0) and Vulkan (intel ICD) on Intel.
+unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME __VK_LAYER_NV_optimus 2>/dev/null || true
+unset VK_ICD_FILENAMES 2>/dev/null || true
+export DRI_PRIME=0
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json
+export MESA_VK_DEVICE_SELECT_DEFAULT_DEVICE_DISABLED=1
+
+exec env java -jar "$HOME/.local/share/tlauncher/TLauncher.jar" "$@"

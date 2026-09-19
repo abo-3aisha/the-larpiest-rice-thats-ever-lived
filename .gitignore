@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.bak
+*.backup
+config.jsonc.omarchy
+.DS_Store

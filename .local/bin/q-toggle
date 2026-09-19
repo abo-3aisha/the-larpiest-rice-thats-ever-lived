@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Quick-settings toggle helper for the swaync control-center / Hyprland rice.
+# Guards every tool so a missing app shows a toast instead of breaking.
+notify() {
+    command -v notify-send >/dev/null 2>&1 && notify-send -t 2000 -u low "Quick Settings" "$1" 2>/dev/null
+}
+
+case "$1" in
+  wifi-radio)
+    if ! command -v nmcli >/dev/null 2>&1; then
+        notify "NetworkManager (nmcli) is not installed"
+        exit 0
+    fi
+    if [ "$(nmcli radio wifi 2>/dev/null)" = "enabled" ]; then
+        nmcli radio wifi off >/dev/null 2>&1
+        notify "WiFi: OFF"
+    else
+        nmcli radio wifi on >/dev/null 2>&1
+        notify "WiFi: ON"
+    fi
+    ;;
+  wifi)
+    exec "$HOME/.local/bin/wifi-menu"
+    ;;
+  bt)
+    if ! command -v bluetoothctl >/dev/null 2>&1; then
+        notify "Bluetooth is not installed"
+        exit 0
+    fi
+    if bluetoothctl show 2>/dev/null | grep -q "Powered: yes"; then
+        bluetoothctl power off >/dev/null 2>&1
+        notify "Bluetooth: OFF"
+    else
+        bluetoothctl power on >/dev/null 2>&1
+        sleep 1
+        bluetoothctl agent on >/dev/null 2>&1
+        bluetoothctl default-agent >/dev/null 2>&1
+        notify "Bluetooth: ON"
+    fi
+    ;;
+  night)
+    if pgrep -x gammastep >/dev/null 2>&1; then
+        pkill -x gammastep
+        notify "Night light: OFF"
+    else
+        if command -v gammastep >/dev/null 2>&1; then
+            gammastep >/dev/null 2>&1 &
+            sleep 1
+            notify "Night light: ON"
+        else
+            notify "gammastep is not installed"
+        fi
+    fi
+    ;;
+  vol-up)
+    if command -v wpctl >/dev/null 2>&1; then
+        wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+
+    else
+        notify "pipewire (wpctl) is not installed"
+    fi
+    ;;
+  vol-down)
+    if command -v wpctl >/dev/null 2>&1; then
+        wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%-
+    else
+        notify "pipewire (wpctl) is not installed"
+    fi
+    ;;
+  vol-mute)
+    if ! command -v wpctl >/dev/null 2>&1; then
+        notify "pipewire (wpctl) is not installed"
+        exit 0
+    fi
+    if wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -q "MUTED"; then
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/dev/null 2>&1
+        notify "Volume: unmuted"
+    else
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 >/dev/null 2>&1
+        notify "Volume: muted"
+    fi
+    ;;
+  bright-up)
+    if command -v brightnessctl >/dev/null 2>&1; then
+        brightnessctl set 5%+ >/dev/null 2>&1
+    else
+        notify "brightnessctl is not installed"
+    fi
+    ;;
+  bright-down)
+    if command -v brightnessctl >/dev/null 2>&1; then
+        brightnessctl set 5%- >/dev/null 2>&1
+    else
+        notify "brightnessctl is not installed"
+    fi
+    ;;
+  power)
+    exec "$HOME/.local/bin/power-menu"
+    ;;
+  *)
+    notify "Unknown action: $1"
+    ;;
+esac

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# fix-kbd-backlight - install the Acer Nitro AN515-57 keyboard-backlight hwdb fix.
+#
+# Root cause: the generic Acer hwdb rule (svnAcer*:pn*:*) maps the Fn+F9/F10
+# keyboard-illumination scancodes (0xf0/0xef) to screen brightness, so Fn+F10
+# drops the display brightness to 0. GNOME/KDE "fix" this via a model-specific
+# systemd hwdb entry; this installs the same for the AN515-57.
+#
+# Usage: sudo fix-kbd-backlight
+set -euo pipefail
+
+DB_DIR=/etc/udev/hwdb.d
+DB_FILE="$DB_DIR/70-acer-nitro-an515-57-kbd.hwdb"
+SRC="${SRC:-/home/${SUDO_USER:-abo3aisha}/.local/share/acer-an515-57-kbd.hwdb}"
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "run as root:  sudo $0" >&2
+    exit 1
+fi
+
+if [ ! -f "$SRC" ]; then
+    echo "source hwdb missing: $SRC" >&2
+    exit 1
+fi
+
+install -Dm644 "$SRC" "$DB_FILE"
+echo "installed: $DB_FILE"
+
+systemd-hwdb update
+udevadm trigger --sysname-match='event*'
+
+echo
+echo "Done. Log out and back in (or reboot), then test Fn+F9 / Fn+F10."
+echo "  expected: Fn+F9 dims / Fn+F10 brightens the KEYBOARD light,"
+echo "            and the screen brightness never changes."
+echo "Verify with:  sudo evtest /dev/input/by-path/platform-i8042-serio-0-event-kbd"
+echo "  expected:  MSC_SCAN ef -> KEY_KBDILLUMUP,  MSC_SCAN f0 -> KEY_KBDILLUMDOWN"

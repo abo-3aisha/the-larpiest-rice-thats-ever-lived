@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Gaming Mode toggle (Super+B): ON = zero blur/anim/shadows/rounding/gaps,
+# OFF = restore what was there before.  gaming-mode [on|off|toggle]
+set -u
+STATE="$HOME/.cache/gaming_prev"
+NS="notify-send -u low -t 3500"
+
+hy() { hyprctl "$@"; }
+
+getv() {
+    hy getoption "$1" 2>/dev/null | sed -n 's/.*int: \([0-9]*\).*/\1/p'
+}
+
+save_prev() {
+    : > "$STATE"
+    for k in decoration:blur:enabled animations:enabled decoration:drop_shadow \
+             decoration:rounding general:gaps_in general:gaps_out; do
+        printf '%s=%s\n' "$k" "$(getv "$k")" >> "$STATE"
+    done
+}
+
+apply_gaming() {
+    hy keyword decoration:blur:enabled  0
+    hy keyword animations:enabled       0
+    hy keyword decoration:drop_shadow   0
+    hy keyword decoration:rounding      0
+    hy keyword general:gaps_in          2
+    hy keyword general:gaps_out         4
+}
+
+restore_prev() {
+    [ -s "$STATE" ] || return 1
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] && hy keyword "$k" "$v"
+    done < "$STATE"
+    rm -f "$STATE"
+}
+
+case "${1:-toggle}" in
+    on)
+        if [ -s "$STATE" ]; then
+            $NS "Gaming already ON 󰆍" ""
+        else
+            save_prev
+            apply_gaming
+            $NS "Gaming Mode 󰆍 ON" "blur · animations · shadows · gaps = 0"
+        fi
+        ;;
+    off)
+        if restore_prev; then
+            $NS "Effects Back 󰛐" "Restored everything as it was"
+        else
+            $NS "No gaming state" "Press it first (on)" 
+        fi
+        ;;
+    toggle|*)
+        if [ -s "$STATE" ]; then
+            restore_prev
+            $NS "Effects Back 󰛐" "Restored everything as it was"
+        else
+            save_prev
+            apply_gaming
+            $NS "Gaming Mode 󰆍 ON" "blur · animations · shadows · gaps = 0"
+        fi
+        ;;
+esac

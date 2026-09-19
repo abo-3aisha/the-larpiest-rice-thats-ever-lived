@@ -1,0 +1,39 @@
+#!/bin/sh
+# mic-vol — swaync generic-slider (slider#mic) helper.
+#   mic-vol get      -> percent as plain integer (NEVER empty: falls back to cache)
+#   mic-vol set 42   -> wpctl set + cache
+# Guards absorb swaync's spurious open/close getter/setter calls that returned
+# empty/0 and used to silently mute the mic to 0.
+cache="$HOME/.cache/mic-vol"
+[ -f "$cache" ] || echo 100 > "$cache"
+mode="${1:-get}"
+value="$2"
+
+get() {
+    raw="$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null)"
+    if [ -n "$raw" ]; then
+        pct="$(printf '%s' "$raw" | awk '{printf "%.0f", $2*100}')"
+        case "$pct" in
+            ''|*[!0-9]*) cat "$cache" ;;
+            *) [ "$pct" -gt 100 ] && pct=100; echo "$pct" > "$cache"; echo "$pct" ;;
+        esac
+    else
+        cat "$cache"
+    fi
+}
+
+set_vol() {
+    val="$value"
+    case "$val" in
+        ''|*[!0-9]*) exit 0 ;;   # swaync sent empty/NaN while rebuilding the panel — do NOT touch the mic
+    esac
+    [ "$val" -lt 0 ] && val=0
+    [ "$val" -gt 100 ] && val=100
+    wpctl set-volume @DEFAULT_AUDIO_SOURCE@ "${val}%" 2>/dev/null
+    echo "$val" > "$cache"
+}
+
+case "$mode" in
+    set) set_vol ;;
+    *) get ;;
+esac

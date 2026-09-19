@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# logout-menu — SUPER+M: a quick wofi confirmation before logging out.
+# NOTE: HyprMod hijacks `hyprctl dispatch ...` (used to evaluate Lua), so
+#       `dispatch exit` / `dispatch lock` silently do nothing here.
+#       We use logind for logout and the real hyprlock binary for locking.
+sel=$(printf '%s\n' "󰿅  Log out" "󰤄  Lock" "󰌽  Cancel" | wofi --dmenu --prompt "Session" --lines 3 --width 260)
+case "$sel" in
+    *"Log out"*)
+        if command -v loginctl >/dev/null 2>&1 && [ -n "${XDG_SESSION_ID:-}" ]; then
+            loginctl terminate-session "$XDG_SESSION_ID"
+        else
+            pkill -x Hyprland || hyprctl dispatch exit
+        fi
+        ;;
+    *"Lock"*)
+        exec hyprlock
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+exit 0

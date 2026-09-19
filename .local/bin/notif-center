@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Notification center / quick-settings panel toggle (SUPER+N).
+# Starts swaync if it is down, reloads config+styles, then toggles the panel.
+if ! command -v swaync >/dev/null 2>&1 || ! command -v swaync-client >/dev/null 2>&1; then
+    command -v notify-send >/dev/null 2>&1 && \
+        notify-send -t 4000 -u critical "Notification Center" "swaync is not installed — install it (sudo pacman -S swaync)" 2>/dev/null
+    exit 1
+fi
+
+pgrep -x swaync >/dev/null 2>&1 || {
+    swaync >/dev/null 2>&1 &
+    sleep 0.5
+}
+
+/home/abo3aisha/.local/bin/swaync-smart-config 2>/dev/null    # panel labels = real wifi/bt/night state
+swaync-client -R >/dev/null 2>&1          # reload config
+swaync-client -rs >/dev/null 2>&1         # reload style (slider colors follow wallpaper)
+swaync-client -t -sw

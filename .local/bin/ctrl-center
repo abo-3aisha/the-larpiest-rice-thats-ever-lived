@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# ctrl-center — standalone quick-settings app (SUPER+S), wofi-first.
+# Uses the same q-toggle logic as the swaync buttons, in its own window menu.
+
+menu=$(
+    printf '%s\n' \
+        "󰖩  Wi-Fi" \
+        "󰂯  Bluetooth" \
+        "󰽥  Night Light" \
+        "󰝚  Volume +" \
+        "󰝝  Volume -" \
+        "󰝟  Mute / Unmute" \
+        "󰤽  Brightness +" \
+        "󰤾  Brightness -" \
+        "󰐥  Power"
+)
+
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Control Center 󰀄" --lines 9 --width 340)
+[ -z "$sel" ] && exit 0
+
+case "$sel" in
+    *"Wi-Fi"*)              exec "$HOME/.local/bin/wifi-menu" ;;
+    *"Bluetooth"*)          "$HOME/.local/bin/q-toggle" bt ;;
+    *"Night Light"*)        "$HOME/.local/bin/q-toggle" night ;;
+    *"Volume +"*)           "$HOME/.local/bin/q-toggle" vol-up ;;
+    *"Volume -"*)           "$HOME/.local/bin/q-toggle" vol-down ;;
+    *"Mute"*)               "$HOME/.local/bin/q-toggle" vol-mute ;;
+    *"Brightness +"*)       "$HOME/.local/bin/q-toggle" bright-up ;;
+    *"Brightness -"*)       "$HOME/.local/bin/q-toggle" bright-down ;;
+    *"Power"*)              exec "$HOME/.local/bin/power-menu" ;;
+esac
+exit 0

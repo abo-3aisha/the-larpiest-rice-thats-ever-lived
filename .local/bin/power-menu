@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Power-mode + Gaming toggle menu (battery on-click).
+set -u
+NS="notify-send -u low -t 3000"
+
+GAMING="gaming-mode"
+prof() { powerprofilesctl get 2>/dev/null | tr 'A-Z' 'a-z'; }
+cur="$(prof)"
+
+profline() { # $1 label $2 mode
+    if [ "$cur" = "$2" ]; then echo "✓ $1  󰫦 $2"; else echo "  $1  󰫦 $2"; fi
+}
+
+gstate=$([ -s "$HOME/.cache/gaming_prev" ] && echo "✓ Gaming ON 󰆍" || echo "  Gaming OFF 󰆍")
+
+sel=$(printf '%s\n' \
+        "$(profline "󰌾 Power Saver"  power-saver)" \
+        "$(profline "󰾅 Balanced"      balanced)" \
+        "$(profline "󰓅 Performance"   performance)" \
+    "───" \
+        "$gstate  (toggle)" \
+    | wofi --dmenu --prompt "Power 󰚥" --lines 8)
+
+case "$sel" in
+    *"Power Saver"*)  powerprofilesctl set power-saver;  $NS "󰌾 Power Saver" "Low battery usage · light service";;
+    *"Balanced"*)     powerprofilesctl set balanced;     $NS "󰾅 Balanced" "Balanced for everyday use";;
+    *"Performance"*)  powerprofilesctl set performance;  $NS "󰓅 Performance" "Max speed for gaming and heavy apps";;
+    *"Gaming"*)       gaming-mode toggle;;
+esac

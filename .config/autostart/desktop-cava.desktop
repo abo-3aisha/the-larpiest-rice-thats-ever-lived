@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop CAVA
+Exec=/home/abo3aisha/.local/bin/start-desktop-cava
+Icon=utilities-terminal
+Terminal=false
+X-KDE-Autostart-after=plasma-panel

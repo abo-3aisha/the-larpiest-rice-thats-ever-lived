@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Discord "drawer" — Caelestia-style layer that pops up / folds away with SUPER+K.
+# Silent: never opens a toast. If Discord is not running yet it is opened in the
+# background so the drawer has something to show (and only moved to the layer).
+set -e
+
+SPECIAL="DISCORD"
+
+json() { hyprctl -j "$@"; }
+
+discord_addr() {
+    json clients 2>/dev/null | python3 -c '
+import json, sys
+try:
+    cs = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for c in cs:
+    if str(c.get("class", "")).lower() == "discord":
+        print(c.get("address", ""))
+        sys.exit(0)
+sys.exit(1)'
+}
+
+layer_visible() {
+    json activeworkspace 2>/dev/null | python3 -c '
+import json, sys
+try:
+    print("1" if str(json.load(sys.stdin).get("name", "")).startswith("special:DISCORD") else "0")
+except Exception:
+    print("0")'
+}
+
+toggle() {
+    if [ "$(layer_visible)" = "1" ]; then
+        hyprctl dispatch togglespecialworkspace "$SPECIAL"
+        return
+    fi
+    local addr i
+    addr=$(discord_addr) || true
+    if [ -z "$addr" ]; then
+        hyprctl dispatch exec discord
+        for i in $(seq 1 20); do
+            sleep 0.75
+            addr=$(discord_addr) || true
+            [ -n "$addr" ] && break
+        done
+    fi
+    if [ -n "$addr" ]; then
+        hyprctl dispatch "movetoworkspace special:$SPECIAL,address:$addr" || true
+        sleep 0.2
+    fi
+    hyprctl dispatch togglespecialworkspace "$SPECIAL"
+}
+
+case "${1:-toggle}" in
+    toggle) toggle ;;
+    hide)
+        if [ "$(layer_visible)" = "1" ]; then
+            hyprctl dispatch togglespecialworkspace "$SPECIAL"
+        fi
+        ;;
+    *)
+        echo "usage: discord-layer [toggle|hide]" >&2
+        exit 1
+        ;;
+esac

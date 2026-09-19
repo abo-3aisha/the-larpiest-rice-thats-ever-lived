@@ -1,0 +1,375 @@
+* {
+    font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace;
+    font-size: 16px;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: none;
+}
+
+window#waybar {
+    background: transparent;
+    color: #c4ebf5;
+}
+
+window#waybar.hidden { opacity: 0.0; }
+
+window#waybar.termite { padding: 0; }
+
+window#waybar.empty #window { background: none; }
+
+/* ===== pill containers (liquid glass) ===== */
+.modules-left,
+.modules-center,
+.modules-right {
+    background: rgba(47, 40, 60, 0.40);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    padding: 2px 8px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 6px 18px rgba(0,0,0,0.12);
+}
+.modules-left:hover,
+.modules-center:hover,
+.modules-right:hover { background: rgba(47, 40, 60, 0.55); }
+.modules-left { margin-left: 10px; }
+.modules-right { margin-right: 10px; }
+
+/* ===== logo ===== */
+#custom-logo {
+    font-size: 20px;
+    padding: 0 10px 0 8px;
+    color: #6fdbfe;
+}
+
+/* ===== workspaces ===== */
+#workspaces button {
+    padding: 0 6px;
+    margin: 0 1px;
+    color: #a6a9b0;
+    border-radius: 12px;
+}
+#workspaces button.active {
+    background: #6fdbfe;
+    color: #111113;
+}
+#workspaces button:hover {
+    background: #2f283c;
+    color: #6fdbfe;
+    border: 1px solid #6fdbfe;
+}
+
+/* ===== generic modules ===== */
+#clock, #custom-language, #network, #bluetooth, #pulseaudio, #battery,
+#cpu, #memory, #temperature, #tray, #custom-power, #custom-weather, #idle_inhibitor {
+    padding: 0 9px;
+    margin: 1px 2px;
+    border-radius: 12px;
+    color: #c4ebf5;
+}
+
+#clock {
+    font-weight: bold;
+    color: #c4ebf5;
+}
+#clock:hover { color: #6fdbfe; }
+
+#custom-language {
+    background: #6fdbfe;
+    color: #111113;
+    border-radius: 12px;
+    padding: 0 9px;
+    margin: 1px 2px;
+}
+
+#network, #bluetooth, #pulseaudio, #battery, #cpu, #memory, #temperature {
+    color: #a6a9b0;
+}
+#network:hover, #bluetooth:hover, #pulseaudio:hover, #battery:hover,
+#cpu:hover, #memory:hover, #temperature:hover { color: #6fdbfe; }
+
+#battery.warning { color: #f08c00; }
+#battery.critical { color: #e5484d; }
+#temperature.critical { color: #e5484d; }
+
+#custom-power {
+    font-size: 19px;
+    color: #a6a9b0;
+}
+#custom-power:hover { color: #e5484d; }
+
+#tray > .passive {
+    color: #a6a9b0;
+}
+#tray > .active {
+    color: #c4ebf5;
+}
+#tray > .needs-attention {
+    background: #e5484d;
+    color: #111113;
+}
+
+/* ===== tooltip ===== */
+tooltip {
+    background: #1d152b;
+    border: 1px solid #6fdbfe;
+    border-radius: 12px;
+    color: #c4ebf5;
+}
+tooltip label {
+    color: #c4ebf5;
+    font-size: 15px;
+}
+
+
+/* ===== persisted custom rules (auto re-appended by palette.py) ===== */
+/* NOTE: theme tokens (#6fdbfe, #a6a9b0, #111113, #2f283c, #e5484d)
+   are substituted by palette.py before appending, so the whole bar stays
+   in sync with the wallpaper accent on every theme change. */
+
+/* circular workspace buttons (survives palette.py template regen) */
+#workspaces button { min-width: 20px; min-height: 20px; padding: 0; margin: 0 1px; color: #a6a9b0; border-radius: 50%; }
+#workspaces button.active { background: #6fdbfe; color: #111113; }
+#workspaces button:hover { background: #2f283c; color: #6fdbfe; border: 1px solid #6fdbfe; }
+
+/* discord layer (super+K): small icon beside active ws number */
+#custom-comm-layer { margin: 0; padding: 0; min-width: 0; font-size: 12px; color: transparent; }
+#custom-comm-layer.active { font-size: 12px; margin: 0 9px 0 2px; padding: 0; color: #6fdbfe; }
+#custom-comm-layer:hover { color: #6fdbfe; }
+#custom-weather { color: #a6a9b0; }
+#custom-weather:hover { color: #6fdbfe; }
+#custom-wifi { color: #a6a9b0; }
+#custom-wifi:hover { color: #6fdbfe; }
+#custom-wifi.off { color: #5b5f66; }
+#custom-wifi.off:hover { color: #6fdbfe; }
+#custom-wifi.disconnected { color: #a6a9b0; }
+
+/* net speed (whole-device up/down, centered before the clock) */
+#custom-net-speed {
+    font-size: 10px;
+    margin: 1px 4px;
+    padding: 0;
+    color: #a6a9b0;
+}
+#custom-net-speed:hover { color: #6fdbfe; }
+#custom-net-speed.offline { color: transparent; }
+
+#custom-battery {
+    min-width: 36px;
+    background-position: center;
+    min-height: 18px;
+    margin: 1px 8px 1px 0px;
+    padding: 0;
+    background-repeat: no-repeat;
+    color: #a6a9b0;
+    font-size: 9px;
+}
+#custom-battery:hover { color: #6fdbfe; }
+#custom-battery.charging { color: #a6a9b0; }
+#custom-battery.critical { color: #e5484d; }
+#custom-battery label { font-size: 9px; padding: 0; }
+#custom-battery.b0 { background-image: url("/home/abo3aisha/.config/waybar/batt/g0.png"); }
+#custom-battery.b1 { background-image: url("/home/abo3aisha/.config/waybar/batt/g1.png"); }
+#custom-battery.b2 { background-image: url("/home/abo3aisha/.config/waybar/batt/g2.png"); }
+#custom-battery.b3 { background-image: url("/home/abo3aisha/.config/waybar/batt/g3.png"); }
+#custom-battery.b4 { background-image: url("/home/abo3aisha/.config/waybar/batt/g4.png"); }
+#custom-battery.b5 { background-image: url("/home/abo3aisha/.config/waybar/batt/g5.png"); }
+#custom-battery.b6 { background-image: url("/home/abo3aisha/.config/waybar/batt/g6.png"); }
+#custom-battery.b7 { background-image: url("/home/abo3aisha/.config/waybar/batt/g7.png"); }
+#custom-battery.b8 { background-image: url("/home/abo3aisha/.config/waybar/batt/g8.png"); }
+#custom-battery.b9 { background-image: url("/home/abo3aisha/.config/waybar/batt/g9.png"); }
+#custom-battery.b10 { background-image: url("/home/abo3aisha/.config/waybar/batt/g10.png"); }
+#custom-battery.b11 { background-image: url("/home/abo3aisha/.config/waybar/batt/g11.png"); }
+#custom-battery.b12 { background-image: url("/home/abo3aisha/.config/waybar/batt/g12.png"); }
+#custom-battery.b13 { background-image: url("/home/abo3aisha/.config/waybar/batt/g13.png"); }
+#custom-battery.b14 { background-image: url("/home/abo3aisha/.config/waybar/batt/g14.png"); }
+#custom-battery.b15 { background-image: url("/home/abo3aisha/.config/waybar/batt/g15.png"); }
+#custom-battery.b16 { background-image: url("/home/abo3aisha/.config/waybar/batt/g16.png"); }
+#custom-battery.b17 { background-image: url("/home/abo3aisha/.config/waybar/batt/g17.png"); }
+#custom-battery.b18 { background-image: url("/home/abo3aisha/.config/waybar/batt/g18.png"); }
+#custom-battery.b19 { background-image: url("/home/abo3aisha/.config/waybar/batt/g19.png"); }
+#custom-battery.b20 { background-image: url("/home/abo3aisha/.config/waybar/batt/g20.png"); }
+#custom-battery.b21 { background-image: url("/home/abo3aisha/.config/waybar/batt/g21.png"); }
+#custom-battery.b22 { background-image: url("/home/abo3aisha/.config/waybar/batt/g22.png"); }
+#custom-battery.b23 { background-image: url("/home/abo3aisha/.config/waybar/batt/g23.png"); }
+#custom-battery.b24 { background-image: url("/home/abo3aisha/.config/waybar/batt/g24.png"); }
+#custom-battery.b25 { background-image: url("/home/abo3aisha/.config/waybar/batt/g25.png"); }
+#custom-battery.b26 { background-image: url("/home/abo3aisha/.config/waybar/batt/g26.png"); }
+#custom-battery.b27 { background-image: url("/home/abo3aisha/.config/waybar/batt/g27.png"); }
+#custom-battery.b28 { background-image: url("/home/abo3aisha/.config/waybar/batt/g28.png"); }
+#custom-battery.b29 { background-image: url("/home/abo3aisha/.config/waybar/batt/g29.png"); }
+#custom-battery.b30 { background-image: url("/home/abo3aisha/.config/waybar/batt/g30.png"); }
+#custom-battery.b31 { background-image: url("/home/abo3aisha/.config/waybar/batt/g31.png"); }
+#custom-battery.b32 { background-image: url("/home/abo3aisha/.config/waybar/batt/g32.png"); }
+#custom-battery.b33 { background-image: url("/home/abo3aisha/.config/waybar/batt/g33.png"); }
+#custom-battery.b34 { background-image: url("/home/abo3aisha/.config/waybar/batt/g34.png"); }
+#custom-battery.b35 { background-image: url("/home/abo3aisha/.config/waybar/batt/g35.png"); }
+#custom-battery.b36 { background-image: url("/home/abo3aisha/.config/waybar/batt/g36.png"); }
+#custom-battery.b37 { background-image: url("/home/abo3aisha/.config/waybar/batt/g37.png"); }
+#custom-battery.b38 { background-image: url("/home/abo3aisha/.config/waybar/batt/g38.png"); }
+#custom-battery.b39 { background-image: url("/home/abo3aisha/.config/waybar/batt/g39.png"); }
+#custom-battery.b40 { background-image: url("/home/abo3aisha/.config/waybar/batt/g40.png"); }
+#custom-battery.b41 { background-image: url("/home/abo3aisha/.config/waybar/batt/g41.png"); }
+#custom-battery.b42 { background-image: url("/home/abo3aisha/.config/waybar/batt/g42.png"); }
+#custom-battery.b43 { background-image: url("/home/abo3aisha/.config/waybar/batt/g43.png"); }
+#custom-battery.b44 { background-image: url("/home/abo3aisha/.config/waybar/batt/g44.png"); }
+#custom-battery.b45 { background-image: url("/home/abo3aisha/.config/waybar/batt/g45.png"); }
+#custom-battery.b46 { background-image: url("/home/abo3aisha/.config/waybar/batt/g46.png"); }
+#custom-battery.b47 { background-image: url("/home/abo3aisha/.config/waybar/batt/g47.png"); }
+#custom-battery.b48 { background-image: url("/home/abo3aisha/.config/waybar/batt/g48.png"); }
+#custom-battery.b49 { background-image: url("/home/abo3aisha/.config/waybar/batt/g49.png"); }
+#custom-battery.b50 { background-image: url("/home/abo3aisha/.config/waybar/batt/g50.png"); }
+#custom-battery.b51 { background-image: url("/home/abo3aisha/.config/waybar/batt/g51.png"); }
+#custom-battery.b52 { background-image: url("/home/abo3aisha/.config/waybar/batt/g52.png"); }
+#custom-battery.b53 { background-image: url("/home/abo3aisha/.config/waybar/batt/g53.png"); }
+#custom-battery.b54 { background-image: url("/home/abo3aisha/.config/waybar/batt/g54.png"); }
+#custom-battery.b55 { background-image: url("/home/abo3aisha/.config/waybar/batt/g55.png"); }
+#custom-battery.b56 { background-image: url("/home/abo3aisha/.config/waybar/batt/g56.png"); }
+#custom-battery.b57 { background-image: url("/home/abo3aisha/.config/waybar/batt/g57.png"); }
+#custom-battery.b58 { background-image: url("/home/abo3aisha/.config/waybar/batt/g58.png"); }
+#custom-battery.b59 { background-image: url("/home/abo3aisha/.config/waybar/batt/g59.png"); }
+#custom-battery.b60 { background-image: url("/home/abo3aisha/.config/waybar/batt/g60.png"); }
+#custom-battery.b61 { background-image: url("/home/abo3aisha/.config/waybar/batt/g61.png"); }
+#custom-battery.b62 { background-image: url("/home/abo3aisha/.config/waybar/batt/g62.png"); }
+#custom-battery.b63 { background-image: url("/home/abo3aisha/.config/waybar/batt/g63.png"); }
+#custom-battery.b64 { background-image: url("/home/abo3aisha/.config/waybar/batt/g64.png"); }
+#custom-battery.b65 { background-image: url("/home/abo3aisha/.config/waybar/batt/g65.png"); }
+#custom-battery.b66 { background-image: url("/home/abo3aisha/.config/waybar/batt/g66.png"); }
+#custom-battery.b67 { background-image: url("/home/abo3aisha/.config/waybar/batt/g67.png"); }
+#custom-battery.b68 { background-image: url("/home/abo3aisha/.config/waybar/batt/g68.png"); }
+#custom-battery.b69 { background-image: url("/home/abo3aisha/.config/waybar/batt/g69.png"); }
+#custom-battery.b70 { background-image: url("/home/abo3aisha/.config/waybar/batt/g70.png"); }
+#custom-battery.b71 { background-image: url("/home/abo3aisha/.config/waybar/batt/g71.png"); }
+#custom-battery.b72 { background-image: url("/home/abo3aisha/.config/waybar/batt/g72.png"); }
+#custom-battery.b73 { background-image: url("/home/abo3aisha/.config/waybar/batt/g73.png"); }
+#custom-battery.b74 { background-image: url("/home/abo3aisha/.config/waybar/batt/g74.png"); }
+#custom-battery.b75 { background-image: url("/home/abo3aisha/.config/waybar/batt/g75.png"); }
+#custom-battery.b76 { background-image: url("/home/abo3aisha/.config/waybar/batt/g76.png"); }
+#custom-battery.b77 { background-image: url("/home/abo3aisha/.config/waybar/batt/g77.png"); }
+#custom-battery.b78 { background-image: url("/home/abo3aisha/.config/waybar/batt/g78.png"); }
+#custom-battery.b79 { background-image: url("/home/abo3aisha/.config/waybar/batt/g79.png"); }
+#custom-battery.b80 { background-image: url("/home/abo3aisha/.config/waybar/batt/g80.png"); }
+#custom-battery.b81 { background-image: url("/home/abo3aisha/.config/waybar/batt/g81.png"); }
+#custom-battery.b82 { background-image: url("/home/abo3aisha/.config/waybar/batt/g82.png"); }
+#custom-battery.b83 { background-image: url("/home/abo3aisha/.config/waybar/batt/g83.png"); }
+#custom-battery.b84 { background-image: url("/home/abo3aisha/.config/waybar/batt/g84.png"); }
+#custom-battery.b85 { background-image: url("/home/abo3aisha/.config/waybar/batt/g85.png"); }
+#custom-battery.b86 { background-image: url("/home/abo3aisha/.config/waybar/batt/g86.png"); }
+#custom-battery.b87 { background-image: url("/home/abo3aisha/.config/waybar/batt/g87.png"); }
+#custom-battery.b88 { background-image: url("/home/abo3aisha/.config/waybar/batt/g88.png"); }
+#custom-battery.b89 { background-image: url("/home/abo3aisha/.config/waybar/batt/g89.png"); }
+#custom-battery.b90 { background-image: url("/home/abo3aisha/.config/waybar/batt/g90.png"); }
+#custom-battery.b91 { background-image: url("/home/abo3aisha/.config/waybar/batt/g91.png"); }
+#custom-battery.b92 { background-image: url("/home/abo3aisha/.config/waybar/batt/g92.png"); }
+#custom-battery.b93 { background-image: url("/home/abo3aisha/.config/waybar/batt/g93.png"); }
+#custom-battery.b94 { background-image: url("/home/abo3aisha/.config/waybar/batt/g94.png"); }
+#custom-battery.b95 { background-image: url("/home/abo3aisha/.config/waybar/batt/g95.png"); }
+#custom-battery.b96 { background-image: url("/home/abo3aisha/.config/waybar/batt/g96.png"); }
+#custom-battery.b97 { background-image: url("/home/abo3aisha/.config/waybar/batt/g97.png"); }
+#custom-battery.b98 { background-image: url("/home/abo3aisha/.config/waybar/batt/g98.png"); }
+#custom-battery.b99 { background-image: url("/home/abo3aisha/.config/waybar/batt/g99.png"); }
+#custom-battery.b100 { background-image: url("/home/abo3aisha/.config/waybar/batt/g100.png"); }
+#custom-battery.b0.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r0.png"); }
+#custom-battery.b1.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r1.png"); }
+#custom-battery.b2.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r2.png"); }
+#custom-battery.b3.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r3.png"); }
+#custom-battery.b4.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r4.png"); }
+#custom-battery.b5.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r5.png"); }
+#custom-battery.b6.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r6.png"); }
+#custom-battery.b7.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r7.png"); }
+#custom-battery.b8.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r8.png"); }
+#custom-battery.b9.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r9.png"); }
+#custom-battery.b10.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r10.png"); }
+#custom-battery.b11.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r11.png"); }
+#custom-battery.b12.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r12.png"); }
+#custom-battery.b13.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r13.png"); }
+#custom-battery.b14.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r14.png"); }
+#custom-battery.b15.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r15.png"); }
+#custom-battery.b16.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r16.png"); }
+#custom-battery.b17.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r17.png"); }
+#custom-battery.b18.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r18.png"); }
+#custom-battery.b19.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r19.png"); }
+#custom-battery.b20.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r20.png"); }
+#custom-battery.b21.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r21.png"); }
+#custom-battery.b22.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r22.png"); }
+#custom-battery.b23.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r23.png"); }
+#custom-battery.b24.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r24.png"); }
+#custom-battery.b25.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r25.png"); }
+#custom-battery.b26.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r26.png"); }
+#custom-battery.b27.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r27.png"); }
+#custom-battery.b28.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r28.png"); }
+#custom-battery.b29.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r29.png"); }
+#custom-battery.b30.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r30.png"); }
+#custom-battery.b31.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r31.png"); }
+#custom-battery.b32.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r32.png"); }
+#custom-battery.b33.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r33.png"); }
+#custom-battery.b34.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r34.png"); }
+#custom-battery.b35.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r35.png"); }
+#custom-battery.b36.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r36.png"); }
+#custom-battery.b37.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r37.png"); }
+#custom-battery.b38.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r38.png"); }
+#custom-battery.b39.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r39.png"); }
+#custom-battery.b40.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r40.png"); }
+#custom-battery.b41.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r41.png"); }
+#custom-battery.b42.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r42.png"); }
+#custom-battery.b43.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r43.png"); }
+#custom-battery.b44.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r44.png"); }
+#custom-battery.b45.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r45.png"); }
+#custom-battery.b46.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r46.png"); }
+#custom-battery.b47.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r47.png"); }
+#custom-battery.b48.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r48.png"); }
+#custom-battery.b49.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r49.png"); }
+#custom-battery.b50.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r50.png"); }
+#custom-battery.b51.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r51.png"); }
+#custom-battery.b52.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r52.png"); }
+#custom-battery.b53.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r53.png"); }
+#custom-battery.b54.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r54.png"); }
+#custom-battery.b55.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r55.png"); }
+#custom-battery.b56.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r56.png"); }
+#custom-battery.b57.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r57.png"); }
+#custom-battery.b58.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r58.png"); }
+#custom-battery.b59.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r59.png"); }
+#custom-battery.b60.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r60.png"); }
+#custom-battery.b61.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r61.png"); }
+#custom-battery.b62.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r62.png"); }
+#custom-battery.b63.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r63.png"); }
+#custom-battery.b64.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r64.png"); }
+#custom-battery.b65.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r65.png"); }
+#custom-battery.b66.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r66.png"); }
+#custom-battery.b67.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r67.png"); }
+#custom-battery.b68.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r68.png"); }
+#custom-battery.b69.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r69.png"); }
+#custom-battery.b70.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r70.png"); }
+#custom-battery.b71.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r71.png"); }
+#custom-battery.b72.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r72.png"); }
+#custom-battery.b73.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r73.png"); }
+#custom-battery.b74.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r74.png"); }
+#custom-battery.b75.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r75.png"); }
+#custom-battery.b76.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r76.png"); }
+#custom-battery.b77.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r77.png"); }
+#custom-battery.b78.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r78.png"); }
+#custom-battery.b79.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r79.png"); }
+#custom-battery.b80.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r80.png"); }
+#custom-battery.b81.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r81.png"); }
+#custom-battery.b82.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r82.png"); }
+#custom-battery.b83.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r83.png"); }
+#custom-battery.b84.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r84.png"); }
+#custom-battery.b85.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r85.png"); }
+#custom-battery.b86.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r86.png"); }
+#custom-battery.b87.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r87.png"); }
+#custom-battery.b88.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r88.png"); }
+#custom-battery.b89.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r89.png"); }
+#custom-battery.b90.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r90.png"); }
+#custom-battery.b91.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r91.png"); }
+#custom-battery.b92.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r92.png"); }
+#custom-battery.b93.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r93.png"); }
+#custom-battery.b94.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r94.png"); }
+#custom-battery.b95.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r95.png"); }
+#custom-battery.b96.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r96.png"); }
+#custom-battery.b97.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r97.png"); }
+#custom-battery.b98.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r98.png"); }
+#custom-battery.b99.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r99.png"); }
+#custom-battery.b100.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r100.png"); }
+

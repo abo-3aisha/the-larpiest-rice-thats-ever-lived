@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# mirror-tiled — reverse (mirror) tiled windows left<->right on the active workspace.
+# Avoids the "dispatch" dispatcher entirely (HyprMod hijacks it to evaluate Lua).
+# Uses Hyprland top-level IPC via the command socket: focuswindow + layoutmsg swapnext/swapwith.
+
+exec 9>"$HOME/.cache/mirror-tiled.lock"
+flock -n 9 || exit 0
+
+find_sock() {
+    local base p
+    base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr
+    for p in "$base"/*/.socket2.sock; do
+        [ -S "$p" ] && { SOCK="$p"; return; }
+    done
+    SOCK=""
+}
+
+send() {
+    local out
+    out=$(python3 -c '
+import socket, struct, sys
+path, data = sys.argv[1], sys.argv[2].encode()
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(0.4)
+s.connect(path)
+s.sendall(struct.pack("<I", len(data)) + data)
+buf = b""
+try:
+    while True:
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+except socket.timeout:
+    pass
+s.close()
+head = buf[:4]
+n = struct.unpack("<I", head)[0] if len(head) == 4 else -1
+body = buf[4:4 + n] if n > 0 else b""
+sys.stdout.write(body.decode(errors="replace") if body else buf[4:].decode(errors="replace")[:80])
+' "$SOCK" "$1")
+    printf '  [%s] %s\n' "$1" "$out" >>"$LOG"
+}
+
+LOG=~/.cache/mirror-tiled.log
+: >"$LOG"
+
+SOCK=""
+find_sock
+[ -z "$SOCK" ] && exit 0
+
+WS=$(hyprctl -j activeworkspace 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || exit 0
+
+list() {
+    hyprctl -j clients 2>/dev/null | python3 -c '
+import json, sys
+ws = int(sys.argv[1])
+data = json.load(sys.stdin)
+tiled = sorted((c["at"][0], c["address"]) for c in data
+               if c["workspace"]["id"] == ws and not c["floating"])
+print("\n".join(a for _, a in tiled))
+' "$WS"
+}
+
+addr=$(list)
+total=$(printf '%s\n' "$addr" | sed '/^$/d' | wc -l)
+echo "[$(date +%T)] n=$total" >>"$LOG"
+[ "$total" -le 1 ] && exit 0
+
+p=0
+while [ "$p" -lt $((total - 1)) ]; do
+    cur=$(list | sed '/^$/d')
+    left=$(printf '%s\n' "$cur" | head -1)
+    send "focuswindow address:$left"
+    k=0
+    while [ "$k" -lt $((total - p - 1)) ]; do
+        send "layoutmsg swapnext"
+        k=$((k + 1))
+    done
+    p=$((p + 1))
+done

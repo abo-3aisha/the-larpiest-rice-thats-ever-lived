@@ -1,0 +1,5 @@
+#!/bin/sh
+# open-foot — launch foot. Terminal colors are already kept current by the single
+# theme engine (palette.py --apply on wallpaper switch + --watch at boot), so the
+# old per-launch foot-refresh.py (Python + PIL + hyprctl + wal) was pure overhead.
+exec foot

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# session-menu — top-right dropdown: Sleep / Reboot / Shutdown (waybar power button).
+set -u
+
+menu=""
+for m in wofi rofi fuzzel; do
+    command -v "$m" >/dev/null 2>&1 && menu="$m" && break
+done
+
+if [ -z "$menu" ]; then
+    notify-send -u low -t 2600 "Session" "no menu app (wofi/rofi/fuzzel)" 2>/dev/null
+    exit 1
+fi
+
+GW="$(hyprctl -j monitors 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    m = next((x for x in d if x.get('focused')), d[0])
+    print(int(m['width'] / m['scale']))
+except Exception:
+    print('0')" 2>/dev/null)"
+GW="${GW:-0}"
+
+if [ "$GW" -gt 0 ]; then
+    X=$(( GW - 250 ))
+    [ "$X" -lt 0 ] && X=0
+else
+    X=0
+fi
+
+opts="󰒲  Sleep\n󰜎  Reboot\n󰐥  Shutdown\n"
+case "$menu" in
+    wofi)   sel="$(printf "%b" "$opts" | wofi --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 --lines 3 2>/dev/null)" ;;
+    rofi)   sel="$(printf "%b" "$opts" | rofi -dmenu -p "⏻" -xoffset "$X" -yoffset 12 -lines 3 2>/dev/null)" ;;
+    fuzzel) sel="$(printf "%b" "$opts" | fuzzel --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 2>/dev/null)" ;;
+esac
+
+case "$sel" in
+    *Sleep*)    systemctl suspend ;;
+    *Reboot*)   systemctl reboot ;;
+    *Shutdown*) systemctl poweroff ;;
+esac

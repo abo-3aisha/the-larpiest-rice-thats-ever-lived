@@ -1,0 +1,159 @@
+* {
+    font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace;
+}
+
+.control-center {
+    background: rgba(29, 21, 43, 0.80);
+    border: 1px solid #6fdbfe44;
+    border-radius: 18px;
+}
+
+.notification-window {
+    background: #1d152b;
+    border: 1px solid #6fdbfe44;
+    border-radius: 18px;
+}
+
+.widget-title {
+    color: #c4ebf5;
+}
+.widget-title > button {
+    background: #2f283c;
+    color: #c4ebf5;
+    border-radius: 10px;
+}
+
+.notification-row {
+    outline: none;
+}
+
+.notification {
+    background: #2f283c;
+    border-radius: 14px;
+    padding: 8px 12px;
+    color: #c4ebf5;
+}
+
+.notification-content {
+    background: #2f283c;
+    color: #c4ebf5;
+}
+
+.notification-default-action, .notification-action {
+    background: #1d152b;
+    color: #c4ebf5;
+    border-radius: 8px;
+}
+
+.notification-default-action:hover, .notification-action:hover {
+    background: #6fdbfe;
+    color: #111113;
+}
+
+.notification-body {
+    color: #a6a9b0;
+}
+
+.notification-title {
+    color: #c4ebf5;
+    font-weight: bold;
+}
+
+.close-button {
+    background: #e5484d;
+    color: #111113;
+    border-radius: 50%;
+}
+
+#dnd {
+    color: #6fdbfe;
+}
+#dnd > button {
+    background: #2f283c;
+    color: #6fdbfe;
+    border-radius: 10px;
+}
+
+.parameter-value {
+    color: #6fdbfe;
+}
+
+/* --- Control-center tiles (Android-style quick settings) --- */
+/* --- Quick toggles (menubar buttons#quick -> css class "quick") --- */
+ .widget-menubar {
+     margin: 4px 0;
+     background: transparent;
+ }
+ .quick button {
+     background: #6fdbfe40;
+     color: #6fdbfe;
+     border: 2px solid transparent;
+     border-top: 2px solid #6fdbfe88;
+     border-bottom: 2px solid #6fdbfe2E;
+     border-radius: 18px;
+     font-weight: bold;
+     padding: 12px 14px;
+ }
+ .quick button label {
+     color: #6fdbfe;
+ }
+ .quick button:hover {
+     border: 2px solid #6fdbfe;
+     background: #6fdbfe55;
+ }
+ .quick button:active {
+     background: #6fdbfe66;
+ }
+ /* A toggle tile that is ON gets the .active class and is filled with the wallpaper accent (like Android) */
+ .quick button.active {
+     background: #6fdbfe;
+     color: #111113;
+     border: 2px solid #ffe9f1;
+ }
+ .quick button.active:hover {
+     border: 2px solid #ffe9f1;
+     background: #6fdbfe;
+     opacity: 0.95;
+ }
+
+/* --- Sliders (volume + mic) follow the wallpaper accent --- */
+#volume trough, #brightness trough,
+.widget-volume trough, .widget-backlight trough {
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 999px;
+    min-width: 6px;
+    min-height: 6px;
+}
+#volume highlight, #brightness highlight,
+.widget-volume highlight, .widget-backlight highlight {
+    background: #6fdbfe;
+    border-radius: 999px;
+    opacity: 0.92;
+}
+#volume scale trough, #brightness scale trough,
+#volume slider trough, #brightness slider trough,
+.widget-volume scale trough, .widget-backlight scale trough,
+.mic scale trough, #mic scale trough, .volume scale trough {
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 999px;
+    min-width: 6px;
+    min-height: 6px;
+}
+#volume scale trough highlight, #brightness scale trough highlight,
+#volume slider trough highlight, #brightness slider trough highlight,
+.widget-volume scale trough highlight, .widget-backlight scale trough highlight,
+.mic scale trough highlight, #mic scale trough highlight, .volume scale trough highlight {
+    background: #6fdbfe;
+    border-radius: 999px;
+    opacity: 0.92;
+}
+#volume scale slider, #brightness scale slider,
+#volume slider slider, #brightness slider slider,
+.widget-volume scale slider, .widget-backlight scale slider,
+.mic scale slider, #mic scale slider, .volume scale slider {
+    background: #ffe9f1;
+    border: 2px solid #6fdbfe;
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+}

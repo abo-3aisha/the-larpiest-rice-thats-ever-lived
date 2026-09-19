@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Launch TLauncher on the NVIDIA dGPU (PRIME offload) so Minecraft uses the RTX 3060.
+exec env __NV_PRIME_RENDER_OFFLOAD=1 \
+       __GLX_VENDOR_LIBRARY_NAME=nvidia \
+       VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
+       java -jar "$HOME/.local/share/tlauncher/TLauncher.jar" "$@"
