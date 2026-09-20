@@ -1,6 +1,9 @@
 # the larpiest rice that's ever lived
 
-A Hyprland rice on CachyOS, themed around a certain virtual idol with long teal hair.
+It's my first project so be nice i used ai alot cause i'm a beginner but i like how hyprland
+so i want something that's reflect my self into any pc or laptop
+So:
+I'ts a Hyprland rice on CachyOS, themed around a certain virtual idol with long teal hair.
 Everything is driven by **one color engine** glued to the wallpaper.
 
 ## Highlights
@@ -37,12 +40,10 @@ leaked fallback colors (`7aa2f7` / `6068c8`).
 These are personal dotfiles meant as a reference. Copy what you need into
 `~/.config` and `~/.local/bin`, then reload Hyprland.
 
-## Scripts must stay ENGLISH inside
-
-UI strings in scripts/menus/labels must remain English for correct rendering in
-waybar / wofi / swaync / terminals.
-
 ## Wallpaper daemon
 
 `awww` (successor to swww) for images, `mpvpaper` for video. Not both at once.
 `apply-wallpaper` auto-detects by extension.
+
+
+Note: i wanted to mix the cleanest things from android , default hyprland and other known shells
