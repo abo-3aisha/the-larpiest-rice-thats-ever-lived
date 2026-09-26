@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+# Widget Clockana — faithful C port of end-4/dots-hyprland ii "cookie" clock.
+# Reproduces the DEFAULT end4 config (Config.qml clock.cookie):
+#   sides=14, dialNumberStyle="full", hourHandStyle="fill",
+#   minuteHandStyle="medium", secondHandStyle="dot" (hidden: secondPrecision=false),
+#   dateStyle="bubble", timeIndicators=true, hourMarks=false, useSineCookie=false.
+# Everything is drawn in a 230-unit box and scaled to the widget, so the
+# proportions match the original exactly at any size.
+import math
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+import widget_lib
+from widget_lib import mkwin, one_instance
+
+pidf = one_instance("clockana")
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk
+import cairo
+
+ACCENT = widget_lib.accent()
+
+
+def _rgb(h):
+    return (int(h[:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def rgb2hsv(r, g, b):
+    mx, mn = max(r, g, b), min(r, g, b)
+    d = mx - mn
+    if d == 0:
+        h = 0.0
+    elif mx == r:
+        h = (60 * ((g - b) / d)) % 360
+    elif mx == g:
+        h = 60 * ((b - r) / d + 2)
+    else:
+        h = 60 * ((r - g) / d + 4)
+    s = 0.0 if mx == 0 else d / mx
+    return h, s, mx
+
+
+def hsv2rgb(h, s, v):
+    c = v * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = v - c
+    if h < 60:
+        r, g, b = c, x, 0
+    elif h < 120:
+        r, g, b = x, c, 0
+    elif h < 180:
+        r, g, b = 0, c, x
+    elif h < 240:
+        r, g, b = 0, x, c
+    elif h < 300:
+        r, g, b = x, 0, c
+    else:
+        r, g, b = c, 0, x
+    return (r + m, g + m, b + m)
+
+
+def mix(c1, c2, p):
+    return tuple(round(p * c1[i] + (1 - p) * c2[i]) for i in range(3))
+
+
+def hsla(h, s, l):
+    # Material-style color from hue/sat/lightness (s, l in 0..1), returns 0-255 tuple
+    if l <= 0:
+        return (0, 0, 0)
+    if l >= 1:
+        return (255, 255, 255)
+    v = l + s * min(l, 1 - l)
+    ss = 0 if v == 0 else 2 * (1 - l / v)
+    return tuple(int(round(c * 255)) for c in hsv2rgb(h % 360, min(ss, 1), min(v, 1)))
+
+
+ACCENT_RGB = _rgb(ACCENT)
+_ah, _as, _al = rgb2hsv(*ACCENT_RGB)
+_as = max(0.20, _as / 255.0 if _as <= 1 else _as)
+_al = _al / 255.0 if _al > 1 else _al
+# If hex accent, hsv components above were raw 0-255; normalize.
+_ah = _ah % 360
+
+# ---- Material-ish dark scheme (colors derived from the wallpaper accent) ----
+PRIMARY = hsla(_ah, min(0.45 + _as * 0.4, 0.85), 0.82)            # hour hand, digits base
+FACE = hsla(_ah, min(0.25 + _as * 0.45, 0.60), 0.30)              # primaryContainer: cookie face
+SECONDARY = hsla(_ah, min(0.18 + _as * 0.3, 0.5), 0.80)
+ON_FACE = mix(SECONDARY, FACE, 0.15)      # marks (colOnBackground) = 85% secondary + 15% container
+DIGIT = mix(FACE, PRIMARY, 0.45)          # colBackgroundInfo = 45% primary + 55% container
+TERTIARY = hsla(_ah + 150, min(0.45 + _as * 0.4, 0.85), 0.82)      # minute hand
+TERTIARY_CONTAINER = hsla(_ah + 150, min(0.25 + _as * 0.45, 0.60), 0.30)
+SECONDARY_CONTAINER = hsla(_ah, min(0.20 + _as * 0.4, 0.55), 0.32)
+ON_TERT = hsla(_ah + 150, 0.10, 0.88)
+ON_SEC = hsla(_ah, 0.10, 0.90)
+SHADOW = (0, 0, 0)
+
+win, box = mkwin("clockana", "")
+
+e = widget_lib.entry("clockana")
+sw, sh = widget_lib.monitor_size()
+side = int(min(sw * e.get("w", 0.14), sh * e.get("h", 0.25)))
+side = max(120, min(side, 420))
+win.resize(side, side)
+
+da = Gtk.DrawingArea()
+da_w = side - 30
+da.set_size_request(max(80, da_w), max(80, da_w))
+box.pack_start(da, True, True, 0)
+
+
+class Smooth:
+    """350ms emphasized easing for hand rotations (matches end4 RotationAnimation)."""
+
+    def __init__(self):
+        self.val = None
+        self.tgt = None
+        self.t0 = 0.0
+
+    def step(self, tgt, now):
+        if self.val is None:
+            self.val = self.tgt = tgt
+            return tgt
+        while tgt < self.tgt - 0.5:
+            tgt += 1.0
+        while tgt > self.tgt + 0.5:
+            tgt -= 1.0
+        if self.tgt != tgt:
+            self.tgt = tgt
+            self.t0 = now
+        d = min(1.0, (now - self.t0) / 0.35)
+        e = 1 - (1 - d) ** 3
+        self.val = self.val + (self.tgt - self.val) * e
+        return self.val
+
+
+HOUR_S, MIN_S = Smooth(), Smooth()
+
+# ---------------------------------------------------------------------------
+# Faithful rounded-polygon builder (port of end-4/rounded-polygon-qmljs).
+# Returns a list of cubic segments in a [0,1]^2 normalized box.
+# ---------------------------------------------------------------------------
+
+def build_rounded_polygon(vertices, corner_radius):
+    """vertices: list of (x, y) in arbitrary units (centered at origin).
+    corner_radius: absolute radius used for the corner cut.
+    Returns list of cubics as (x0,y0,c0x,c0y,c1x,c1y,x1,y1) tuples."""
+    n = len(vertices)
+    if n == 0:
+        return []
+    # Precompute direction vectors + corner data (same math as RoundedCorner.js)
+    dirs = []
+    cuts = []
+    for i in range(n):
+        p = vertices[i]
+        prev = vertices[(i - 1) % n]
+        nxt = vertices[(i + 1) % n]
+        d1 = (prev[0] - p[0], prev[1] - p[1])
+        d2 = (nxt[0] - p[0], nxt[1] - p[1])
+        l1 = math.hypot(*d1)
+        l2 = math.hypot(*d2)
+        if l1 > 0:
+            d1 = (d1[0] / l1, d1[1] / l1)
+        if l2 > 0:
+            d2 = (d2[0] / l2, d2[1] / l2)
+        cosA = d1[0] * d2[0] + d1[1] * d2[1]
+        sinA = math.sqrt(max(0.0, 1 - cosA * cosA))
+        cut = corner_radius * (cosA + 1) / sinA if sinA > 1e-4 else 1e9
+        dirs.append((d1, d2))
+        cuts.append((cut, math.acos(max(-1, min(1, cosA)))))
+    # Clamp cuts so two adjacent corners never consume more than the side
+    sides = [math.hypot(vertices[(i + 1) % n][0] - vertices[i][0],
+                        vertices[(i + 1) % n][1] - vertices[i][1]) for i in range(n)]
+    cut2 = [0.0] * n
+    for i in range(n):
+        a, b = cuts[i][0], cuts[(i - 1) % n][0]
+        want = min(a, b, sides[i] * 0.49 or 1e9)
+        cut2[i] = want
+    # Points A (start, on incoming edge) and B (end, on outgoing edge) per corner
+    A = []
+    B = []
+    cubics = []
+    for i in range(n):
+        p = vertices[i]
+        (d1, d2) = dirs[i]
+        phi = cuts[i][1]
+        r = corner_radius
+        if cut2[i] < 1e-4 or r < 1e-4:
+            # no rounding: sharp vertex
+            A.append((p[0] + d1[0] * 0.05, p[1] + d1[1] * 0.05))
+            B.append((p[0] + d2[0] * 0.05, p[1] + d2[1] * 0.05))
+            continue
+        aP = (p[0] + d1[0] * cut2[i], p[1] + d1[1] * cut2[i])
+        bP = (p[0] + d2[0] * cut2[i], p[1] + d2[1] * cut2[i])
+        A.append(aP)
+        B.append(bP)
+        # control points toward the corner (arc bulges toward the removed tip)
+        k = (4.0 / 3.0) * r * math.tan(phi / 4.0)
+        c0 = (aP[0] - d1[0] * k, aP[1] - d1[1] * k)
+        c1 = (bP[0] - d2[0] * k, bP[1] - d2[1] * k)
+        cubics.append((aP[0], aP[1], c0[0], c0[1], c1[0], c1[1], bP[0], bP[1]))
+    # Straight edges between consecutive corners, then normalize-to-box
+    edges = []
+    for i in range(n):
+        j = (i + 1) % n
+        edges.append((B[i][0], B[i][1], 0.0, 0.0, 0.0, 0.0, A[j][0], A[j][1]))
+    allc = cubics + edges
+    # normalized(): fit into [0,1]^2 centered
+    minx = min(min(c[0], c[2], c[4], c[6]) for c in allc)
+    maxx = max(max(c[0], c[2], c[4], c[6]) for c in allc)
+    miny = min(min(c[1], c[3], c[5], c[7]) for c in allc)
+    maxy = max(max(c[1], c[3], c[5], c[7]) for c in allc)
+    w = maxx - minx
+    h = maxy - miny
+    side2 = max(w, h)
+    offx = (side2 - w) / 2 - minx
+    offy = (side2 - h) / 2 - miny
+    out = []
+    for c in allc:
+        out.append(tuple(((c[k] + offx) / side2 if k % 2 == 0 else (c[k] + offy) / side2) for k in range(8)))
+    return out
+
+
+# ---- star(14, 1, 0.8).transformed(rotate30).normalized() --------------------
+SIDES = 14
+_ROT30 = math.radians(30)
+_star_verts = []
+for i in range(SIDES):
+    a0 = _ROT30 + (2 * math.pi / SIDES) * i
+    a1 = _ROT30 + (2 * math.pi / SIDES) * (i + 0.5)
+    _star_verts.append((math.cos(a0), math.sin(a0)))
+    _star_verts.append((0.8 * math.cos(a1), 0.8 * math.sin(a1)))
+STAR_230 = build_rounded_polygon(_star_verts, 1.5 / SIDES)
+
+
+def trace_polygon(ctx, cubics, box):
+    """Trace cubics (normalized 0..1) scaled to a 'box' pixel size (square)."""
+    if not cubics:
+        return
+    ctx.move_to(cubics[0][6] * box, cubics[0][7] * box)
+    for c in cubics:
+        ctx.curve_to(c[2] * box, c[3] * box, c[4] * box, c[5] * box, c[6] * box, c[7] * box)
+    ctx.close_path()
+
+
+def set_rgba(ctx, c, a=1.0):
+    ctx.set_source_rgba(c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, a)
+
+
+def capsule(ctx, cx, cy, ang, front, tail, width, color, alpha=1.0):
+    """Rounded-capsule hand: pivot at (cx,cy); 'tail' px behind, 'front' px ahead."""
+    dx, dy = math.cos(ang), math.sin(ang)
+    set_rgba(ctx, color, alpha)
+    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+    ctx.set_line_width(width)
+    ctx.move_to(cx - dx * tail, cy - dy * tail)
+    ctx.line_to(cx + dx * front, cy + dy * front)
+    ctx.stroke()
+
+
+# center of the 230 box in the scaled window
+def on_draw(w, ctx):
+    W = w.get_allocated_width()
+    H = w.get_allocated_height()
+    ctx.set_operator(cairo.OPERATOR_CLEAR)
+    ctx.paint()
+    ctx.set_operator(cairo.OPERATOR_OVER)
+
+    S = min(W, H)
+    u = S / 230.0
+    cx, cy = W / 2, H / 2
+
+    now = time.localtime()
+    mn_t = now.tm_min
+    hr_t = now.tm_hour % 12 + now.tm_min / 60.0
+
+    # ---- shadow (DropShadow radius 8, samples 17, black 30%) ----
+    for off, alpha in ((14, 0.08), (9, 0.09), (5, 0.10), (2, 0.10)):
+        ctx.save()
+        ctx.translate(cx - 115 * u, cy - 115 * u + off * u)
+        ctx.scale(u, u)
+        set_rgba(ctx, SHADOW, alpha)
+        trace_polygon(ctx, STAR_230, 230)
+        ctx.fill()
+        ctx.restore()
+
+    ctx.save()
+    ctx.translate(cx - 115 * u, cy - 115 * u)
+    ctx.scale(u, u)
+
+    # ---- cookie face (colPrimaryContainer, slightly translucent) ----
+    trace_polygon(ctx, STAR_230, 230)
+    set_rgba(ctx, FACE, 0.88)
+    ctx.fill()
+    # subtle brighten inside to mimic material tonal surface
+    trace_polygon(ctx, STAR_230, 230)
+    set_rgba(ctx, (255, 255, 255), 0.02)
+    ctx.fill()
+
+    # ---- dial marks + time indicators + date bubbles REMOVED (user request) ----
+
+    # ---- minute hand (medium: 95x12, tail 6 / front 89, colTertiary) ----
+    m_ang = -math.pi / 2 + (6.0 * mn_t) * math.pi / 180.0
+    capsule(ctx, 115, 115, m_ang, 89, 6, 12, TERTIARY, 0.92)
+
+    # ---- hour hand (fill: 72x20, tail 10 / front 62, colPrimary) ----
+    h_ang = -math.pi / 2 + (30.0 * hr_t) * math.pi / 180.0
+    capsule(ctx, 115, 115, h_ang, 62, 10, 20, PRIMARY, 0.92)
+
+    # ---- center dot (6x6, face color) hides pivots ----
+    set_rgba(ctx, FACE, 0.9)
+    ctx.arc(115, 115, 3, 0, 2 * math.pi)
+    ctx.fill()
+
+    ctx.restore()
+    return False
+
+
+def on_destroy(*a):
+    try:
+        os.unlink(pidf)
+    except OSError:
+        pass
+    Gtk.main_quit()
+
+
+def main():
+    da.connect("draw", on_draw)
+    GLib.timeout_add(16, lambda: (da.queue_draw(), True)[1])
+    win.connect("destroy", on_destroy)
+    win.show_all()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise

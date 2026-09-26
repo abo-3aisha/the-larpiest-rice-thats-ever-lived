@@ -45,6 +45,19 @@ hl.window_rule({ match = { fullscreen = false }, opacity = vars.windowOpacity ..
 -- Center all floating windows except xwayland windows (xwayland popups count as windows)
 hl.window_rule({ match = { float = true, xwayland = false }, center = true })
 
+-- Cava audio dock: thin transparent EQ strip glued to the bottom edge
+-- (later than the center rule on purpose so the move/size win)
+hl.window_rule({
+    match            = { class = "cava-dock" },
+    float            = true,
+    size             = "(monitor_w) 34px",
+    move             = "(monitor_w*0.5 - window_w/2) (monitor_h - window_h)",
+    pin              = true,
+    no_initial_focus = true,
+    no_shadow        = true,
+    rounding         = 4,
+})
+
 -- Picture in picture (move and resize done via resizer in execs.lua)
 hl.window_rule({
     match             = { title = "Picture(-| )in(-| )[Pp]icture" },

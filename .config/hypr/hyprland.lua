@@ -55,8 +55,12 @@ hl.on("hyprland.start", function()
     -- Top bar
     hl.exec_cmd("waybar")
 
-    -- Miku desktop pet (floats on workspace 1)
-    hl.exec_cmd("/home/abo3aisha/.local/bin/miku-pet")
+    -- Bottom cava EQ: GRAPHICAL gold bars (Cairo) on a true bottom layer
+    hl.exec_cmd("/home/abo3aisha/.local/bin/cava-dock")
+
+    -- Desktop widgets (clock/music/sys/miku/miku-pet/cava) after the
+    -- compositor has settled; placement comes from widget-manager config.
+    hl.exec_cmd("/home/abo3aisha/.local/bin/widgets-apply")
 
     -- Notifications
     hl.exec_cmd("swaync")
@@ -87,6 +91,7 @@ hl.env("HYPRCURSOR_THEME", "Bibata-Modern-Ice")
 
 hl.env("GBM_BACKEND", "nvidia-drm")
 hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
+hl.env("__NV_PRIME_RENDER_OFFLOAD", "1")
 hl.env("WLR_NO_HARDWARE_CURSORS", "1")
 
 
@@ -153,8 +158,8 @@ hl.curve("buttery",        { type = "spring", mass = 0.75, stiffness = 320, damp
 hl.animation({ leaf = "global",        enabled = true,  speed = 8,    bezier = "default" })
 hl.animation({ leaf = "border",        enabled = true,  speed = 5,    bezier = "easeOutQuint" })
 hl.animation({ leaf = "windows",       enabled = true,  speed = 4.5,  spring = "buttery" })
-hl.animation({ leaf = "windowsIn",     enabled = true,  speed = 3.6,  spring = "easy",        style = "popin 82%" })
-hl.animation({ leaf = "windowsOut",    enabled = true,  speed = 1.4,  spring = "easy",        style = "popin 82%" })
+hl.animation({ leaf = "windowsIn",     enabled = true,  speed = 4.2,  spring = "easy",        style = "popin 78%" })
+hl.animation({ leaf = "windowsOut",    enabled = true,  speed = 2.6,  spring = "easy",        style = "popin 78%" })
 hl.animation({ leaf = "fadeIn",        enabled = true,  speed = 2.2,  bezier = "almostLinear" })
 hl.animation({ leaf = "fadeOut",       enabled = true,  speed = 1.6,  bezier = "almostLinear" })
 hl.animation({ leaf = "fade",          enabled = true,  speed = 3,    bezier = "quick" })
@@ -243,9 +248,10 @@ hl.window_rule({ match = { fullscreen = true }, no_blur = true, opaque = true })
 
 hl.window_rule({ match = { class = "nowpanel" }, float = true, size = "1160 300", move = "(monitor_w-1160)*0.5 (monitor_h-300)*0.5", rounding = 18, border_size = 1 })
 
--- === MIKU DESKTOP PET (floating, bottom-right, no decorations) ===
-
-hl.window_rule({ match = { class = "miku-pet" }, float = true, size = "336 414", move = "(monitor_w-336-32) (monitor_h-414-22)" })
+-- === MIKU DESKTOP PET — placement is managed live by widget-manager /
+-- widgets-apply (SUPER+S > Widgets), so NO static float rule here (a static
+-- rule would win over the dynamic title rules). Default box in widgets.json
+-- reproduces the old bottom-right spot. ===
 
 -- === WALLPAPER (Super+W) ===
 
@@ -263,11 +269,12 @@ hl.bind("CTRL + PRINT",          hl.dsp.exec_cmd(shot .. " output"))
 -- === ESSENTIAL APPS ===
 
 hl.bind(mainMod .. " + SPACE",  hl.dsp.exec_cmd("wofi --show drun"))
-hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd("foot"))
+hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd("contour"))
+hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("wezterm"))
 hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("thunar"))
 hl.bind(mainMod .. " + B",          hl.dsp.exec_cmd("cycle-power"))
 hl.bind(mainMod .. " + SHIFT + B", hl.dsp.exec_cmd("firefox"))
-hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd("foot"))
+hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd("contour"))
 
 -- === WINDOW MANAGEMENT ===
 

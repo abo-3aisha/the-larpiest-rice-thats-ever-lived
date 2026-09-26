@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+# Lock Screen Style — edit the hyprlock lock-screen widgets (SUPER+S).
+# Real GTK widgets cannot render on the lock surface (hyprlock draws ABOVE
+# everything), so lock "widgets" are hyprlock-NATIVE blocks — text labels for
+# clock/date/hijri/prayer/music/sys/miku, plus one annotated PNG image for the
+# cookie clock (rendered by ~/.local/bin/lockclockana and refreshed every 5s
+# via reload_cmd so the hands stay live). smart pet and cava EQ are
+# graphical-only and therefore NOT offered here.
+#
+# PLACEMENT RULE (hyprlock 0.9.x): only the halign/valign anchors are
+# reliable — the installed build falls back to screen center when `position`
+# contains negative offsets (that's why the OLD clock `position = 0 90`
+# rendered at the top while center/center + negative offsets all stacked in
+# the middle). So displacement uses anchors + small POSITIVE offsets only:
+# x<0.3 -> halign=left,  x>0.7 -> halign=right,  else halign=center;
+# y<0.3 -> valign=top,   y>0.7 -> valign=bottom, else valign=center.
+# (v0.9.6 src: IWidget::posFromHAlign honours offsets, but a rejected
+# negative LAYOUTXY keeps the default (0,0) => every label lands at center.)
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import warnings
+
+warnings.filterwarnings("ignore", module="gi")
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gtk
+
+import widget_lib
+
+LOCK_DIR = os.path.expanduser("~/.config/lockscreen")
+LOCK_JSON = os.path.join(LOCK_DIR, "lockscreen.json")
+HL_CONF = os.path.expanduser("~/.config/hypr/hyprlock.conf")
+BACKUP = os.path.expanduser("~/backups/hyprlock-before-lockscreen-style.conf")
+
+KEYS = ["clockana", "clock", "date", "hijri", "prayer", "music", "sys", "miku"]
+NAMES = {
+    "clockana": "Cookie Clock",
+    "clock": "Clock",
+    "date": "Date",
+    "hijri": "Hijri Date",
+    "prayer": "Next Prayer",
+    "music": "Music (now playing)",
+    "sys": "System (CPU/MEM)",
+    "miku": "Miku",
+}
+
+TEXT = {
+    "clock": 'cmd[update:1000] echo "$(LC_TIME=C date +"%I:%M %p")"',
+    "date": 'cmd[update:30000] echo "$(LC_TIME=C date +"%A, %B %d")"',
+    "hijri": "cmd[update:3600000] ~/.local/bin/hijri-text",
+    "prayer": "cmd[update:30000] ~/.local/bin/prayer-times --next",
+    "music": "cmd[update:2000] playerctl -a metadata --format '{{artist}} - {{title}}' 2>/dev/null || echo 'No music'",
+    "sys": 'cmd[update:5000] echo "CPU $(~/.local/bin/sys-widget cpu)%  MEM $(~/.local/bin/sys-widget mem)%"',
+    "miku": "cmd[update:5000] ~/.local/bin/miku-kaomoji",
+}
+
+DEFAULTS = {
+    "clockana": {"enabled": True, "x": 0.50, "y": 0.42, "size": 300},
+    "clock": {"enabled": True, "x": 0.50, "y": 0.03, "size": 72},
+    "date":  {"enabled": True, "x": 0.50, "y": 0.24, "size": 34},
+    "hijri": {"enabled": True, "x": 0.02, "y": 0.02, "size": 30},
+    "prayer": {"enabled": True, "x": 0.50, "y": 0.93, "size": 30},
+    "music": {"enabled": False, "x": 0.50, "y": 0.31, "size": 26},
+    "sys":   {"enabled": False, "x": 0.02, "y": 0.10, "size": 26},
+    "miku":  {"enabled": False, "x": 0.50, "y": 0.85, "size": 60},
+}
+
+# Always-rebuilt fixed blocks: general + background + input-field. They are
+# REGENERATED every save (not copied from the previous file) so they can never
+# be lost when the old file was already stripped.
+FIXED_BLOCKS = """general {
+    no_fade_in = false
+    no_fade_out = true
+    grace = 2
+    ignore_empty_input = true
+    hide_cursor = true
+    immediate_render = true
+}
+
+background {
+    monitor =
+    # empty path = draw no image; Hyprland's session_lock_blur supplies the
+    # LIVE blurred backdrop, this color just tints it.
+    path =
+    color = rgba(23, 23, 26, 0.40)
+    blur_passes = 3
+    blur_size = 9
+    noise = 0.02
+    contrast = 0.9
+    brightness = 0.45
+    vibrancy = 0.2
+    vibrancy_darkness = 0.15
+}
+
+input-field {
+    monitor =
+    size = 280, 46
+    outline_thickness = 2
+    outer_color = rgba(233, 100, 58, 0.85)
+    inner_color = rgba(23, 23, 26, 0.85)
+    font_color = rgba(235, 235, 235, 1.0)
+    placeholder_text = <i>Enter password…</i>
+    placeholder_color = rgba(235, 235, 235, 0.4)
+    fade_on_empty = true
+    dots_size = 0.18
+    dots_spacing = 0.4
+    dots_center = true
+    halign = center
+    valign = center
+    position = 0 0
+}
+"""
+
+LABEL_TPL = """/* @@lockscreen-widget@@ */
+label {{
+    monitor =
+    text = {text}
+    color = rgba(239, 241, 244, 1.0)
+    font_size = {size}
+    font_family = "JetBrainsMono Nerd Font"
+    halign = {halign}
+    valign = {valign}
+    position = {px} {py}
+    shadow_passes = 2
+    shadow_size = 6
+    shadow_color = rgba(0, 0, 0, 0.55)
+}}
+"""
+
+# The cookie clock is a PNG (transparent star + hands) re-rendered by
+# ~/.local/bin/lockclockana; hyprlock reloads it every reload_time seconds so
+# the hands stay correct while locked. reload_cmd prints nothing -> hyprlock
+# keeps using `path`.
+IMAGE_TPL = """/* @@lockscreen-widget@@ */
+image {{
+    monitor =
+    path = ~/.cache/lockscreen-clockana.png
+    size = {size}
+    reload_time = 5
+    reload_cmd = ~/.local/bin/lockclockana
+    rounding = 0
+    border_size = 0
+    halign = {halign}
+    valign = {valign}
+    position = {px} {py}
+}}
+"""
+
+TOP_OFFSET_MAX = 380  # positive offsets in the proven range; stackable
+
+
+def anchor_for(x, y, sw, sh):
+    if x <= 0.30:
+        halign, px = "left", round(x * sw)
+    elif x >= 0.70:
+        halign, px = "right", round((1.0 - x) * sw)
+    else:
+        halign, px = "center", 0
+    if y <= 0.30:
+        valign, py = "top", min(round(y * sh), TOP_OFFSET_MAX)
+    elif y >= 0.70:
+        valign, py = "bottom", min(round((1.0 - y) * sh), TOP_OFFSET_MAX)
+    else:
+        valign, py = "center", 0
+    return halign, valign, px, py
+
+
+def load():
+    try:
+        return json.load(open(LOCK_JSON)).get("widgets", {})
+    except Exception:
+        return {}
+
+
+def build_conf(data):
+    sw, sh = widget_lib.monitor_size()
+    block = ""
+    for k in KEYS:
+        e = data.get(k) or {}
+        if not e.get("enabled"):
+            continue
+        size = int(e.get("size") or DEFAULTS[k]["size"])
+        halign, valign, px, py = anchor_for(float(e.get("x", 0.5)), float(e.get("y", 0.5)), sw, sh)
+        if k == "clockana":
+            block += IMAGE_TPL.format(size=size,
+                                      halign=halign, valign=valign, px=px, py=py) + "\n"
+        else:
+            block += LABEL_TPL.format(text=TEXT[k], size=size,
+                                      halign=halign, valign=valign, px=px, py=py) + "\n"
+    return (FIXED_BLOCKS
+            + "\n\n/* Widgets managed by lockscreen-style (SUPER+S) */\n\n"
+            + block.strip() + "\n")
+
+
+def save(data):
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    with open(LOCK_JSON, "w") as f:
+        json.dump({"v": 2, "widgets": data}, f, indent=2)
+    if not os.path.exists(BACKUP) and os.path.exists(HL_CONF):
+        shutil.copy2(HL_CONF, BACKUP)
+    if data.get("clockana", {}).get("enabled"):
+        subprocess.run(["~/.local/bin/lockclockana"], shell=True, check=False)
+    with open(HL_CONF, "w") as f:
+        f.write(build_conf(data))
+    subprocess.run(["notify-send", "-a", "lockscreen-style", "-u", "normal", "-t", "5000",
+                    "Lock screen", "Saved. Press SUPER+L to preview."], check=False)
+
+
+class Manager(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Lock Screen Style")
+        self.set_default_size(820, 560)
+        self.data = {k: dict(DEFAULTS[k]) for k in KEYS}
+        loaded = load()
+        for k in KEYS:
+            self.data[k].update(loaded.get(k, {}))
+        self.active = None
+        self.spins = {}
+        self.checks = {}
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_margin_start(12)
+        root.set_margin_end(12)
+        root.set_margin_top(12)
+        root.set_margin_bottom(12)
+        self.add(root)
+
+        title = Gtk.Label(label=("Lock widgets are rendered INSIDE hyprlock "
+                                 "(it draws above every window, so real glass widgets can't "
+                                 "show there). Every desktop widget is here: enable it, drag "
+                                 "its box, set its size. Cookie Clock is an analog star rendered "
+                                 "as a PNG and re-drawn every 5s so the hands stay live. smart "
+                                 "pet and cava are graphical-only - hyprlock can't draw them. "
+                                 "Lock with SUPER+L to preview."))
+        title.set_line_wrap(True)
+        title.set_halign(Gtk.Align.START)
+        root.pack_start(title, False, False, 0)
+
+        mid = Gtk.Box(spacing=14)
+        root.pack_start(mid, True, True, 0)
+
+        lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        lst.set_size_request(250, -1)
+        mid.pack_start(lst, False, False, 0)
+        for k in KEYS:
+            row = Gtk.Box(spacing=8)
+            chk = Gtk.CheckButton(label=NAMES[k])
+            chk.set_active(bool(self.data[k].get("enabled")))
+            row.pack_start(chk, True, True, 0)
+            sp = Gtk.SpinButton.new_with_range(14, 450, 1)
+            sp.set_value(int(self.data[k].get("size", DEFAULTS[k]["size"])))
+            sp.set_width_chars(3)
+            row.pack_start(Gtk.Label(label="Pt"), False, False, 0)
+            row.pack_start(sp, False, False, 0)
+            lst.pack_start(row, False, False, 0)
+            self.checks[k] = chk
+            self.spins[k] = sp
+
+        hint = Gtk.Label(label="Drag boxes to move; Pt sets text size.")
+        hint.set_halign(Gtk.Align.START)
+        hint.get_style_context().add_class("dim")
+        lst.pack_start(hint, False, False, 0)
+
+        self.da = Gtk.DrawingArea()
+        self.da.set_size_request(430, 250)
+        self.da.set_events(Gdk.EventMask.BUTTON_PRESS_MASK |
+                           Gdk.EventMask.BUTTON_RELEASE_MASK |
+                           Gdk.EventMask.POINTER_MOTION_MASK)
+        self.da.connect("draw", self.on_draw)
+        self.da.connect("button-press-event", self.on_press)
+        self.da.connect("button-release-event", self.on_release)
+        self.da.connect("motion-notify-event", self.on_motion)
+        mid.pack_start(self.da, True, True, 0)
+
+        btns = Gtk.Box(spacing=8)
+        applyb = Gtk.Button(label="Save & Apply")
+        applyb.connect("clicked", self.on_apply)
+        closeb = Gtk.Button(label="Close")
+        closeb.connect("clicked", lambda *a: self.destroy())
+        btns.pack_start(applyb, False, False, 0)
+        btns.pack_start(closeb, False, False, 0)
+        root.pack_start(btns, False, False, 0)
+
+        self.add_css()
+
+    def add_css(self):
+        p = Gtk.CssProvider()
+        p.load_from_data(b"""
+window { background: rgba(16,16,20,0.96); }
+.dim { color: rgba(230,230,235,0.6); font-size: 11px; }
+""")
+        try:
+            Gtk.StyleContext.add_provider_for_screen(self.get_screen(), p, 800)
+        except Exception:
+            pass
+
+    def preview_geom(self):
+        aw = self.da.get_allocated_width()
+        ah = self.da.get_allocated_height()
+        scale = min(aw / 1600.0, ah / 900.0)
+        w, h = 1600 * scale, 900 * scale
+        ox = (aw - w) / 2
+        oy = (ah - h) / 2
+        return ox, oy, w, h
+
+    def box_rect(self, e, ox, oy, w, h):
+        x = ox + e.get("x", 0.5) * w
+        y = oy + e.get("y", 0.5) * h
+        size = e.get("size", 30)
+        bw = max(80, size * 3.2)
+        bh = max(30, size * 1.35)
+        return x, y, bw, bh
+
+    def on_draw(self, da, ctx):
+        a = widget_lib.accent()
+        ox, oy, w, h = self.preview_geom()
+        ctx.set_source_rgba(0.09, 0.09, 0.12, 1)
+        ctx.rectangle(ox, oy, w, h)
+        ctx.fill()
+        ctx.set_source_rgba(1, 1, 1, 0.18)
+        ctx.set_line_width(1)
+        ctx.rectangle(ox, oy, w, h)
+        ctx.stroke()
+        for k in KEYS:
+            e = self.data.get(k, {})
+            if not e.get("enabled"):
+                continue
+            x, y, bw, bh = self.box_rect(e, ox, oy, w, h)
+            if k == self.active:
+                ctx.set_source_rgba(1, 0.9, 0.45, 0.95)
+            else:
+                c = tuple(int(a[i:i + 2], 16) / 255 for i in (0, 2, 4))
+                ctx.set_source_rgba(c[0], c[1], c[2], 0.9)
+            r = 5
+            ctx.new_path()
+            ctx.arc(x + r, y + r, r, 180 / 180 * 3.1415926, 270 / 180 * 3.1415926)
+            ctx.arc(x + bw - r, y + r, r, 270 / 180 * 3.1415926, 0)
+            ctx.arc(x + bw - r, y + bh - r, r, 0, 90 / 180 * 3.1415926)
+            ctx.arc(x + r, y + bh - r, r, 90 / 180 * 3.1415926, 180 / 180 * 3.1415926)
+            ctx.close_path()
+            ctx.fill()
+            ctx.set_source_rgba(0, 0, 0, 0.45)
+            ctx.set_font_size(10)
+            ctx.move_to(x + 6, y + 12)
+            ctx.show_text(NAMES[k])
+        return False
+
+    def pick(self, px, py):
+        ox, oy, w, h = self.preview_geom()
+        for k in KEYS:
+            e = self.data.get(k, {})
+            if not e.get("enabled"):
+                continue
+            x, y, bw, bh = self.box_rect(e, ox, oy, w, h)
+            if x <= px <= x + bw and y <= py <= y + bh:
+                return k
+        return None
+
+    def on_press(self, da, ev):
+        k = self.pick(ev.x, ev.y)
+        if k:
+            self.active = k
+            da.queue_draw()
+        return True
+
+    def on_release(self, da, ev):
+        self.active = None
+        da.queue_draw()
+        return True
+
+    def on_motion(self, da, ev):
+        if not self.active:
+            return True
+        ox, oy, w, h = self.preview_geom()
+        e = self.data[self.active]
+        e["x"] = round(max(0.0, min(1.0, (ev.x - ox) / w)), 3)
+        e["y"] = round(max(0.0, min(1.0, (ev.y - oy) / h)), 3)
+        da.queue_draw()
+        return True
+
+    def on_apply(self, *a):
+        for k in KEYS:
+            self.data[k]["enabled"] = bool(self.checks[k].get_active())
+            self.data[k]["size"] = int(self.spins[k].get_value())
+        save(self.data)
+
+
+def main():
+    win = Manager()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()

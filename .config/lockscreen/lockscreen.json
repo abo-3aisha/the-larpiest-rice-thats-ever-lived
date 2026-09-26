@@ -1,0 +1,53 @@
+{
+  "v": 2,
+  "widgets": {
+    "clockana": {
+      "enabled": true,
+      "x": 0.546,
+      "y": 0.039,
+      "size": 300
+    },
+    "clock": {
+      "enabled": false,
+      "x": 0.469,
+      "y": 0.211,
+      "size": 40
+    },
+    "date": {
+      "enabled": true,
+      "x": 0.927,
+      "y": 0.003,
+      "size": 18
+    },
+    "hijri": {
+      "enabled": true,
+      "x": 0.013,
+      "y": 0.017,
+      "size": 30
+    },
+    "prayer": {
+      "enabled": true,
+      "x": 0.501,
+      "y": 0.953,
+      "size": 30
+    },
+    "music": {
+      "enabled": false,
+      "x": 0.5,
+      "y": 0.31,
+      "size": 26
+    },
+    "sys": {
+      "enabled": false,
+      "x": 0.02,
+      "y": 0.1,
+      "size": 26
+    },
+    "miku": {
+      "enabled": false,
+      "x": 0.5,
+      "y": 0.85,
+      "size": 60
+    }
+  }
+}
