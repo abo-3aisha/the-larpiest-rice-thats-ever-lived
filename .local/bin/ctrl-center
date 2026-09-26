@@ -14,7 +14,7 @@ menu=$(
         "󰤾  Brightness -" \
         "󰔟  Widgets" \
         "󰌾  Lock Screen Style" \
-        "🕌  My Prays" \
+        "󱠧  My Prays" \
         "󰐥  Power"
 )
 
@@ -32,7 +32,7 @@ case "$sel" in
     *"Brightness -"*)      "$HOME/.local/bin/q-toggle" bright-down ;;
     *"Widgets"*)           exec "$HOME/.local/bin/widget-manager" ;;
     *"Lock Screen"*)       exec "$HOME/.local/bin/lockscreen-style" ;;
-    *"My Prays"*)          exec "$HOME/.local/bin/my-prays" ;;
+    *"󱠧  My Prays" \
     *"Power"*)              exec "$HOME/.local/bin/power-menu" ;;
 esac
 exit 0
