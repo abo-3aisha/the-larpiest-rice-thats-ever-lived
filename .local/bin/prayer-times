@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""Prayer time notifier — 100% offline astronomical computation.
+
+Times are computed LOCALLY from the sun position (lat/lon + system clock),
+so they automatically follow the changing day length, seasons, DST and your
+location. The internet is used ONLY to keep the coordinates fresh
+(prayer-locate); if offline, everything keeps working on the last config.
+
+Events: Fajr, Duha, Dhuhr, Asr, Maghrib, Isha.
+
+Usage:
+  prayer-times --today            list the six times for today
+  prayer-times --next             print the next event (name + HH:MM)
+  prayer-times --now              print the prayer we are in now + the next one
+  prayer-times --notify-now       send a notification with that same info
+  prayer-times --notify-next      fire a test notification now
+  prayer-times --sound-test       play the adhan file once
+  prayer-times --test-seen        full rehearsal: adhan + a "Seen" notification
+                                  (click Seen => adhan stops) -- try this once
+  prayer-times --loop             daemon: notifies (with a "Seen" button that
+                                  silences the adhan) + rings it at every event;
+                                  runs prayer-locate at start and every 30 min
+                                  (silent when offline)
+  prayer-times --where            print the coords currently in use
+"""
+import argparse
+import os
+import subprocess
+import sys
+import threading
+import time
+import math
+from datetime import datetime, timedelta, date
+
+CONF = os.path.expanduser("~/.config/prayer/times.conf")
+
+_PLAYER = None
+NAMES = ("Fajr", "Duha", "Dhuhr", "Asr", "Maghrib", "Isha")
+D2R = math.pi / 180.0
+R2D = 180.0 / math.pi
+
+DEFAULTS = dict(lat=33.5138, lon=36.2765, fajr=19.5, isha=17.5,
+                asr=1.0, duha=20,
+                sound=os.path.expanduser("~/.local/share/prayer/adhan.mp3"))
+
+
+def read_cfg():
+    """Load ~/.config/prayer/times.conf into a dict (env vars override)."""
+    cfg = dict(DEFAULTS)
+    try:
+        for line in open(CONF, errors="replace"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip().lower()
+            if k in ("lat", "lon", "fajr", "isha", "asr"):
+                try:
+                    cfg[k] = float(v.strip())
+                except Exception:
+                    pass
+            elif k == "duha":
+                try:
+                    cfg["duha"] = int(v.strip())
+                except Exception:
+                    pass
+            else:
+                cfg[k.strip()] = v.strip()
+    except Exception:
+        pass
+    cfg["sound"] = os.path.expanduser(cfg.get("sound") or "")
+    cfg["alarm"] = cfg.get("alarm", "1") == "1"
+    for n in NAMES:
+        key = n.lower() + "_enabled"
+        cfg[key] = cfg.get(key, "1") == "1"
+    for key, fn in (("lat", float), ("lon", float), ("fajr", float),
+                    ("isha", float), ("asr", float), ("duha", int)):
+        env = {"lat": "PRAYER_LAT", "lon": "PRAYER_LON", "fajr": "PRAYER_FAJR",
+               "isha": "PRAYER_ISHA", "asr": "ASR_FACTOR",
+               "duha": "PRAYER_DUHA_MIN"}[key]
+        if os.environ.get(env):
+            try:
+                cfg[key] = fn(os.environ[env])
+            except Exception:
+                pass
+    return cfg
+
+
+def fixangle(a):
+    a = a - 360.0 * (a // 360.0)
+    return a - 360.0 if a < 0 else a
+
+
+def sun_position(jd):
+    """Return (declination deg, equation of time min) at a julian day."""
+    d = jd - 2451545.0
+    g = fixangle(357.529 + 0.98560028 * d)
+    q = fixangle(280.459 + 0.98564736 * d)
+    l = fixangle(q + 1.915 * math.sin(g * D2R) + 0.020 * math.sin(2 * g * D2R))
+    e = 23.439 - 0.00000036 * d
+    ra = fixangle(R2D * math.atan2(math.cos(e * D2R) * math.sin(l * D2R),
+                                  math.cos(l * D2R))) / 15.0
+    decl = R2D * math.asin(math.sin(e * D2R) * math.sin(l * D2R))
+    return decl, ((q / 15.0) - ra) * 60.0  # equation of time in minutes
+
+
+def wrap(minutes):
+    return minutes % (24.0 * 60.0)
+
+
+def tz_offset_utc(day):
+    dt = datetime(day.year, day.month, day.day, 12, 0)
+    off = dt.astimezone().utcoffset()
+    return int(off.total_seconds() // 60) if off else int(-time.timezone / 60)
+
+
+def sun_times(day, cfg):
+    """Minutes after local midnight for each event, for `day`."""
+    lat, lon = cfg["lat"], cfg["lon"]
+    offset_min = tz_offset_utc(day)
+    jd = day.toordinal() + 1721424.5 + offset_min / 1440.0
+    j_lon = jd - lon / (15.0 * 24.0)
+    decl, eqt = sun_position(j_lon)
+
+    def hour_angle_min(angle):
+        num = math.sin(angle * D2R) - math.sin(lat * D2R) * math.sin(decl * D2R)
+        den = math.cos(lat * D2R) * math.cos(decl * D2R)
+        cosh = max(-1.0, min(1.0, num / den))
+        return R2D * math.acos(cosh) / 15.0 * 60.0
+
+    noon = (12.0 + offset_min / 60.0 - lon / 15.0 - eqt / 60.0) * 60.0
+    sunrise = noon - hour_angle_min(-0.833)
+    sunset = noon + hour_angle_min(-0.833)
+    fajr = noon - hour_angle_min(-cfg["fajr"])
+    isha = noon + hour_angle_min(-cfg["isha"])
+    arg = math.atan(1.0 / (cfg["asr"] + math.tan(abs(lat - decl) * D2R)))
+    asr = noon + hour_angle_min(R2D * arg)
+    return {
+        "Fajr": wrap(fajr),
+        "Sunrise": wrap(sunrise),
+        "Duha": wrap(sunrise + cfg["duha"]),
+        "Dhuhr": wrap(noon),
+        "Asr": wrap(asr),
+        "Maghrib": wrap(sunset),
+        "Isha": wrap(isha),
+    }
+
+
+def events_for(day, cfg):
+    m = sun_times(day, cfg)
+    return [(n, datetime(day.year, day.month, day.day) + timedelta(minutes=m[n]))
+            for n in NAMES]
+
+
+def fmt(dt):
+    return dt.strftime("%H:%M")
+
+
+def notify(text):
+    subprocess.run(["notify-send", "-a", "prayer-times", "-u", "normal",
+                    "-t", "15000", "Prayer time", text], check=False)
+
+
+def stop_sound():
+    """Silence the currently ringing adhan (if any)."""
+    global _PLAYER
+    p = _PLAYER
+    _PLAYER = None
+    if p is not None and p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(timeout=1.5)
+        except Exception:
+            p.kill()
+        print("[prayer-times] adhan stopped", flush=True)
+
+
+def play_sound(cfg):
+    """Ring the adhan NON-blocking + HEADLESS: sound plays straight to the
+    default sink, never opens a player window. Any previously ringing adhan is
+    silenced first (no double-azan). mp3/ogg/video-renamed-mp3 → ffmpeg -vn to
+    pulse; wav → paplay. Returns the running Popen (None if nothing played)."""
+    global _PLAYER
+    stop_sound()
+    path = cfg.get("sound") or ""
+    if not path or not os.path.isfile(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".wav":
+        candidates = (("paplay", [path]),)
+    else:
+        candidates = (
+            ("ffmpeg", ["-v", "error", "-nostdin", "-i", path,
+                        "-vn", "-f", "pulse", "default"]),
+            ("paplay", [path]),
+            ("mpv", ["--no-video", "--terminal=no", path]),
+        )
+    for exe, args in candidates:
+        if subprocess.run(["sh", "-c", "command -v %s" % exe],
+                          capture_output=True).returncode == 0:
+            _PLAYER = subprocess.Popen([exe] + args, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            print("[prayer-times] adhan via %s (headless)" % exe, flush=True)
+            return _PLAYER
+    print("[prayer-times] no audio player found (ffmpeg/paplay/mpv missing)",
+          flush=True)
+    return None
+
+
+def notify_seen(name, when):
+    """Persistent notification with a REAL "Seen" action button. When the user
+    clicks it the button's action id ("seen") reaches notify-send's stdout,
+    which stops the ringing adhan. Returns (proc, thread) so callers can wait
+    (--test-seen) or fire-and-forget (--loop; the process is alive there)."""
+    proc = subprocess.Popen(
+        ["notify-send", "-a", "prayer-times", "-u", "normal", "-t", "0",
+         "Prayer time", "%s at %s  (Seen to stop the adhan)" % (name, fmt(when)),
+         "--action", "seen=Seen"],
+        stdout=subprocess.PIPE, text=True)
+
+    def watch():
+        try:
+            line = proc.stdout.readline()
+        except Exception:
+            line = None
+        if line and line.strip() == "seen":
+            stop_sound()
+            subprocess.run(["notify-send", "-a", "prayer-times", "-u", "low",
+                            "-t", "3500", "Prayer time", "Adhan stopped"],
+                           check=False)
+
+    th = threading.Thread(target=watch, daemon=True)
+    th.start()
+    return proc, th
+
+
+def next_event(cfg, after):
+    d = after.date()
+    evs = [(n, t) for n, t in events_for(d, cfg) if t > after]
+    if evs:
+        return evs[0]
+    return events_for(date.fromordinal(d.toordinal() + 1), cfg)[0]
+
+
+def enabled_events(cfg, after):
+    """The next event whose prayer alarm is ON (master + per-prayer flag).
+    Returns the very next real event if everything is on; otherwise the first
+    enabled one, scanning forward across days."""
+    d = after.date()
+    for _ in range(4):
+        for n, t in events_for(d, cfg):
+            if t > after:
+                if not cfg.get("alarm", True):
+                    return None
+                if cfg.get(n.lower() + "_enabled", True):
+                    return (n, t)
+        d = date.fromordinal(d.toordinal() + 1)
+    return None
+
+
+def current_phase(cfg, now):
+    """(name, when) of the prayer we are in right now: the most recent event
+    that has already passed today (or yesterday's Isha before Fajr)."""
+    evs = events_for(now.date(), cfg)
+    past = [(n, t) for n, t in evs if t <= now]
+    if past:
+        return past[-1]
+    yesterday = date.fromordinal(now.date().toordinal() - 1)
+    return events_for(yesterday, cfg)[-1]
+
+
+def run_locate():
+    """Best-effort location refresh; never raises, never blocks long."""
+    try:
+        subprocess.run([os.path.expanduser("~/.local/bin/prayer-locate")],
+                       timeout=12, check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--today", action="store_true")
+    ap.add_argument("--next", action="store_true")
+    ap.add_argument("--now", action="store_true")
+    ap.add_argument("--notify-now", action="store_true")
+    ap.add_argument("--notify-next", action="store_true")
+    ap.add_argument("--sound-test", action="store_true")
+    ap.add_argument("--test-seen", action="store_true")
+    ap.add_argument("--where", action="store_true")
+    ap.add_argument("--loop", action="store_true")
+    args = ap.parse_args()
+
+    if args.where:
+        c = read_cfg()
+        city = ""
+        try:
+            for l in open(CONF, errors="replace"):
+                if l.startswith("CITY="):
+                    city = l.partition("=")[2].strip()
+        except Exception:
+            pass
+        print("lat=%s lon=%s city=%s" % (c["lat"], c["lon"], city))
+        return
+
+    if args.today:
+        c = read_cfg()
+        now = datetime.now()
+        for n, t in events_for(now.date(), c):
+            print("%-8s %s%s" % (n, fmt(t), "   <-- next" if t > now and n in
+                                 NAMES and t == next_event(c, now)[1] else ""))
+        return
+
+    if args.next:
+        c = read_cfg()
+        n, t = next_event(c, datetime.now())
+        print("%s %s" % (n, fmt(t)))
+        return
+
+    if args.now:
+        c = read_cfg()
+        now = datetime.now()
+        pn, pt = current_phase(c, now)
+        nn, nt = next_event(c, now)
+        print("Now: %s (at %s)" % (pn, fmt(pt)))
+        print("Next: %s at %s" % (nn, fmt(nt)))
+        return
+
+    if args.notify_now:
+        c = read_cfg()
+        now = datetime.now()
+        pn, pt = current_phase(c, now)
+        nn, nt = next_event(c, now)
+        body = "Now: %s\nNext: %s at %s" % (pn, nn, fmt(nt))
+        subprocess.run(["notify-send", "-a", "prayer-times", "-u", "normal",
+                        "-t", "8000", "Prayer", body], check=False)
+        return
+
+    if args.notify_next:
+        c = read_cfg()
+        n, t = next_event(c, datetime.now())
+        notify("%s at %s" % (n, fmt(t)))
+        print("notified: %s %s" % (n, fmt(t)))
+        return
+
+    if args.sound_test:
+        play_sound(read_cfg())
+        print("sound test sent (if you heard nothing, check SOUND path)")
+        return
+
+    if args.test_seen:
+        c = read_cfg()
+        n, t = next_event(c, datetime.now())
+        play_sound(c)
+        _, watch = notify_seen(n, t)
+        print("test: adhan ringing + Seen notification (click Seen to stop)",
+              flush=True)
+        watch.join(timeout=600)      # keep THIS process alive ← the old bug:
+        # without the join the script exited and the watcher died with it, so
+        # clicking Seen stopped nothing.
+        if watch.is_alive():
+            stop_sound()
+            print("test: 10 min passed without action, adhan stopped")
+        else:
+            print("test: notification closed, watcher finished")
+        return
+
+    ap.print_help()
+
+
+if __name__ == "__main__":
+    if "--loop" in sys.argv:
+        run_locate()          # startup check (silent offline)
+        last_locate = time.time()
+        while True:
+            cfg = read_cfg()
+            today = datetime.now().date()
+            ev = enabled_events(cfg, datetime.now())
+            if ev is None:
+                print("[prayer-times] all alarms off - sleeping 60s",
+                      flush=True)
+                time.sleep(60)
+                continue
+            n, t = ev
+            wait = (t - datetime.now()).total_seconds()
+            print("[prayer-times] next: %s at %s (wait %.0fs)" %
+                  (n, fmt(t), wait), flush=True)
+            if wait > 0:
+                time.sleep(max(0.0, wait - 3.0))
+                if time.time() - last_locate > 30 * 60:   # refresh location
+                    run_locate()
+                    last_locate = time.time()
+                    cfg = read_cfg()
+                    n, t = next_event(cfg, datetime.now())
+            play_sound(cfg)
+            notify_seen(n, t)
+            print("[prayer-times] notified %s (Seen stops adhan)" % n,
+                  flush=True)
+            time.sleep(70)     # avoid double-firing while sound plays
+    else:
+        main()

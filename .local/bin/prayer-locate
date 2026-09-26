@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""prayer-locate — safe online refresh of the prayer-time coordinates.
+
+NEVER trusts a single IP geolocation: a VPN, a foreign wifi exit-node or a
+CDN hop can answer from the wrong country (e.g. a Dutch server while you sit
+in Latakia) and would corrupt the prayer times. So a coordinate change is
+only APPLIED when ALL of these hold:
+
+  1. both sources (ipinfo + ip-api) return a position;
+  2. the two positions agree within ~0.15 deg;
+  3. the timezone offset of the detected position matches the laptop clock
+     (so the machine really is there, and shows the right clock).
+
+Anything else → printed "skipped (unreliable)" and the config is untouched.
+Pure best-effort: network failure is silent, and prayer-times never depends
+on this script.
+
+Run:  prayer-locate --force     check now and always print the verdict
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.request
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+
+CONF = os.path.expanduser("~/.config/prayer/times.conf")
+AGREE = 0.15     # degrees both sources must agree within
+MOVE = 0.05      # degrees config must differ before rewriting
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux) prayer-times/1.0"}
+
+
+def fetch_json(url):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=4) as r:
+        return json.loads(r.read().decode())
+
+
+def sys_offset_min():
+    return int(datetime.now().astimezone().utcoffset().total_seconds() // 60)
+
+
+def tz_offset_min(tz):
+    """UTC offset (minutes) of tz string right now, or None if unknown/fails."""
+    try:
+        return int(datetime.now(ZoneInfo(tz)).utcoffset().total_seconds() // 60)
+    except Exception:
+        return None
+
+
+def raw_detections():
+    """Return up to two dicts: {lat, lon, tz, city, src}. Empty on failure."""
+    out = []
+    try:
+        d = fetch_json("https://ipinfo.io/json")
+        lat, lon = d["loc"].split(",")
+        out.append({"lat": float(lat), "lon": float(lon),
+                    "tz": d.get("timezone", ""), "city": d.get("city", ""),
+                    "src": "ipinfo"})
+    except Exception:
+        pass
+    try:
+        d = fetch_json("http://ip-api.com/json")
+        if d.get("lat") is not None and d.get("lon") is not None:
+            out.append({"lat": d["lat"], "lon": d["lon"],
+                        "tz": d.get("timezone", ""), "city": d.get("city", ""),
+                        "src": "ip-api"})
+    except Exception:
+        pass
+    return out
+
+
+def score(det):
+    """Return (ok, reason): tz offset of the detected place must match the
+    laptop clock, proving we are actually there."""
+    if not det["tz"] or det["tz"] == "Etc/UTC":
+        return False, "source %s: no meaningful timezone" % det["src"]
+    det_off = tz_offset_min(det["tz"])
+    if det_off is None:
+        return False, "source %s: unknown tz %r" % (det["src"], det["tz"])
+    sys_off = sys_offset_min()
+    if abs(det_off - sys_off) > 15:
+        return False, ("source %s tz %s is %+dh vs laptop clock %+dh (foreign "
+                       "exit-node?)" % (det["src"], det["tz"],
+                                        det_off / 60, sys_off / 60))
+    return True, ""
+
+def main():
+    force = "--force" in sys.argv
+    cfg = {}
+    try:
+        for line in open(CONF, errors="replace"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                cfg[k.strip().upper()] = v.strip()
+    except Exception:
+        pass
+    if cfg.get("AUTO", "1") != "1":
+        print("skipped (AUTO=0 in %s)" % CONF)
+        return 0
+
+    dets = raw_detections()
+    if len(dets) < 2:
+        print("skipped (only %d source(s) reachable - unreliable, "
+              "keeping coords)" % len(dets)); return 0
+    reasons = [r for ok, r in (score(d) for d in dets) if not ok]
+    if reasons:
+        print("skipped (unreliable): " + " ; ".join(reasons)); return 0
+
+    a, b = dets[0], dets[1]
+    dist = ((a["lat"] - b["lat"]) ** 2 + (a["lon"] - b["lon"]) ** 2) ** 0.5
+    if dist > AGREE:
+        print("skipped (sources disagree by %.3f deg)" % dist); return 0
+
+    lat = (a["lat"] + b["lat"]) / 2
+    lon = (a["lon"] + b["lon"]) / 2
+    city = a["city"] or b["city"]
+
+    def f(x):
+        try: return float(x)
+        except Exception: return None
+    old_lat, old_lon = f(cfg.get("LAT")), f(cfg.get("LON"))
+    moved = old_lat is None or old_lon is None or \
+        ((lat - old_lat) ** 2 + (lon - old_lon) ** 2) ** 0.5 > MOVE
+    if not moved and not force:
+        print("location ok: %s (%.4f, %.4f)" % (city, lat, lon))
+        return 0
+
+    # commit
+    try:
+        text = open(CONF).read()
+    except Exception:
+        text = ""
+    text = re.sub(r"(?m)^LAT=.*$", "LAT=%.5f" % lat, text)
+    text = re.sub(r"(?m)^LON=.*$", "LON=%.5f" % lon, text)
+    text = re.sub(r"(?m)^CITY=.*$", "CITY=%s" % city, text)
+    if "LAT=" not in text:
+        text += "\nLAT=%.5f\nLON=%.5f\nCITY=%s\n" % (lat, lon, city)
+    with open(CONF, "w") as fh:
+        fh.write(text)
+    msg = "Prayer location: %s (%.3f, %.3f)" % (city or "?", lat, lon)
+    print("updated: " + msg)
+    subprocess.run(["notify-send", "-a", "prayer-times", "-u", "normal",
+                    "-t", "8000", "Prayer times updated", msg], check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

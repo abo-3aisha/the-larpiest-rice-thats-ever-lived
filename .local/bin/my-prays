@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+"""My Prays — prayer settings, adhan-master + per-prayer alarm switches, and a
+random authentic hadith every time the window opens. Launched from SUPER+S
+(Control Center). UI chrome is English; hadith text is shown Arabic + English
+with the isnaad in a smaller line. All math is offline; only the optional
+"Detect" button touches the internet (same guarded logic as prayer-locate)."""
+
+import json
+import os
+import random
+import re
+import subprocess
+from datetime import datetime, timedelta
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+
+CONF = os.path.expanduser("~/.config/prayer/times.conf")
+HADITHS = os.path.expanduser("~/.config/prayer/hadiths.json")
+PT_BIN = os.path.expanduser("~/.local/bin/prayer-times")
+LOCATE_BIN = os.path.expanduser("~/.local/bin/prayer-locate")
+
+NAMES = tuple("Fajr Duha Dhuhr Asr Maghrib Isha".split())
+
+COUNTRIES = [
+    ("Afghanistan", [("Kabul", 34.516, 69.183), ("Herat", 34.344, 62.203)]),
+    ("Albania", [("Tirana", 41.327, 19.818)]),
+    ("Algeria", [("Algiers", 36.754, 3.058), ("Oran", 35.697, -0.633)]),
+    ("Australia", [("Sydney", -33.868, 151.209), ("Melbourne", -37.813, 144.963)]),
+    ("Austria", [("Vienna", 48.208, 16.373)]),
+    ("Azerbaijan", [("Baku", 40.409, 49.867)]),
+    ("Bahrain", [("Manama", 26.228, 50.586)]),
+    ("Bangladesh", [("Dhaka", 23.811, 90.412), ("Chittagong", 22.357, 91.827)]),
+    ("Belgium", [("Brussels", 50.850, 4.352)]),
+    ("Bosnia", [("Sarajevo", 43.856, 18.413)]),
+    ("Brazil", [("Brasilia", -15.794, -47.882), ("Sao Paulo", -23.550, -46.633)]),
+    ("Canada", [("Toronto", 43.653, -79.383), ("Montreal", 45.501, -73.567)]),
+    ("China", [("Beijing", 39.904, 116.407), ("Urumqi", 43.825, 87.617)]),
+    ("Egypt", [("Cairo", 30.045, 31.236), ("Alexandria", 31.201, 29.916)]),
+    ("Eritrea", [("Asmara", 15.331, 38.926)]),
+    ("Ethiopia", [("Addis Ababa", 9.032, 38.742)]),
+    ("France", [("Paris", 48.857, 2.352)]),
+    ("Germany", [("Berlin", 52.520, 13.405)]),
+    ("Ghana", [("Accra", 5.604, -0.187)]),
+    ("India", [("New Delhi", 28.614, 77.209), ("Mumbai", 19.076, 72.878),
+               ("Hyderabad", 17.385, 78.487)]),
+    ("Indonesia", [("Jakarta", -6.209, 106.846)]),
+    ("Iran", [("Tehran", 35.689, 51.389), ("Mashhad", 36.297, 59.606)]),
+    ("Iraq", [("Baghdad", 33.315, 44.366), ("Najaf", 32.000, 44.333),
+              ("Basra", 30.533, 47.817)]),
+    ("Ireland", [("Dublin", 53.350, -6.260)]),
+    ("Israel", [("Jerusalem", 31.776, 35.234)]),
+    ("Italy", [("Rome", 41.902, 12.496)]),
+    ("Japan", [("Tokyo", 35.676, 139.650)]),
+    ("Jordan", [("Amman", 31.956, 35.946), ("Zarqa", 32.083, 36.088)]),
+    ("Kazakhstan", [("Almaty", 43.238, 76.945)]),
+    ("Kuwait", [("Kuwait City", 29.376, 47.977)]),
+    ("Lebanon", [("Beirut", 33.893, 35.502), ("Tripoli", 34.442, 35.830)]),
+    ("Libya", [("Tripoli", 32.887, 13.191)]),
+    ("Malaysia", [("Kuala Lumpur", 3.139, 101.687)]),
+    ("Maldives", [("Male", 4.175, 73.501)]),
+    ("Mauritania", [("Nouakchott", 18.078, -15.974)]),
+    ("Morocco", [("Rabat", 34.021, -6.842), ("Casablanca", 33.573, -7.590)]),
+    ("Netherlands", [("Amsterdam", 52.367, 4.904)]),
+    ("Nigeria", [("Abuja", 9.058, 7.489), ("Lagos", 6.524, 3.379)]),
+    ("Oman", [("Muscat", 23.588, 58.383)]),
+    ("Pakistan", [("Islamabad", 33.689, 73.055), ("Lahore", 31.550, 74.344),
+                  ("Karachi", 24.861, 67.010)]),
+    ("Palestine", [("Ramallah", 31.904, 35.203), ("Hebron", 31.533, 35.095)]),
+    ("Philippines", [("Manila", 14.599, 120.984)]),
+    ("Portugal", [("Lisbon", 38.722, -9.139)]),
+    ("Qatar", [("Doha", 25.286, 51.533)]),
+    ("Russia", [("Moscow", 55.756, 37.617)]),
+    ("Saudi Arabia", [("Riyadh", 24.714, 46.675), ("Makkah", 21.389, 39.858),
+                      ("Madinah", 24.468, 39.614), ("Jeddah", 21.486, 39.193)]),
+    ("Senegal", [("Dakar", 14.716, -17.468)]),
+    ("Somalia", [("Mogadishu", 2.047, 45.318)]),
+    ("South Africa", [("Johannesburg", -26.204, 28.048),
+                      ("Cape Town", -33.925, 18.424)]),
+    ("South Korea", [("Seoul", 37.566, 126.978)]),
+    ("Spain", [("Madrid", 40.417, -3.704)]),
+    ("Sri Lanka", [("Colombo", 6.927, 79.861)]),
+    ("Sudan", [("Khartoum", 15.501, 32.560)]),
+    ("Sweden", [("Stockholm", 59.329, 18.069)]),
+    ("Switzerland", [("Zurich", 47.376, 8.541)]),
+    ("Syria", [("Damascus", 33.514, 36.277), ("Aleppo", 36.202, 37.134),
+               ("Latakia", 35.531, 35.791), ("Homs", 34.729, 36.714)]),
+    ("Tajikistan", [("Dushanbe", 38.561, 68.787)]),
+    ("Thailand", [("Bangkok", 13.756, 100.502)]),
+    ("Tunisia", [("Tunis", 36.807, 10.181)]),
+    ("Turkey", [("Istanbul", 41.008, 28.978), ("Ankara", 39.933, 32.860)]),
+    ("Turkmenistan", [("Ashgabat", 37.960, 58.326)]),
+    ("UAE", [("Abu Dhabi", 24.453, 54.377), ("Dubai", 25.204, 55.270)]),
+    ("UK", [("London", 51.507, -0.128)]),
+    ("Ukraine", [("Kyiv", 50.450, 30.524)]),
+    ("USA", [("Washington", 38.907, -77.037), ("New York", 40.713, -74.006),
+             ("Los Angeles", 34.052, -118.244)]),
+    ("Uzbekistan", [("Tashkent", 41.299, 69.240)]),
+    ("Yemen", [("Sana'a", 15.369, 44.191)]),
+]
+
+_PT = None
+
+
+def prayer_mod():
+    global _PT
+    if _PT is None:
+        import runpy
+        _PT = runpy.run_path(PT_BIN)
+    return _PT
+
+
+def accent():
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import widget_lib
+        return widget_lib.accent()
+    except Exception:
+        return "d7cc00"
+
+
+def load_cfg():
+    try:
+        return prayer_mod()["read_cfg"]()
+    except Exception:
+        return {"lat": 33.514, "lon": 36.277, "alarm": True}
+
+
+ALL_KEYS = ("LAT", "LON", "CITY", "ALARM", "FAJR_ENABLED", "DUHA_ENABLED",
+            "DHUHR_ENABLED", "ASR_ENABLED", "MAGHRIB_ENABLED", "ISHA_ENABLED")
+
+
+def write_keys(updates):
+    text = ""
+    if os.path.isfile(CONF):
+        with open(CONF, errors="replace") as fh:
+            text = fh.read()
+    if not text:
+        text = "# Prayer times config\n"
+    for k, v in updates.items():
+        k = k.upper()
+        pattern = r"(?m)^%s=.*$" % k
+        if re.search(pattern, text):
+            text = re.sub(pattern, "%s=%s" % (k, v), text)
+        else:
+            text = text.rstrip() + "\n%s=%s\n" % (k, v)
+    with open(CONF, "w") as fh:
+        fh.write(text)
+
+
+def load_hadiths():
+    try:
+        with open(HADITHS, errors="replace") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+class MyPrays(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="My Prays")
+        self.set_default_size(600, 820)
+        self.nxt = None
+        self.evs = []
+
+        css = (
+            "window { background-color: #141419; color: #f1f1f3; }\n"
+            "frame { border-color: #2c2c34; }\n"
+            "frame > border { border-radius: 10px; }\n"
+            "label { color: #f1f1f3; }\n"
+            "switch { font-size: 0; }\n"
+        )
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            self.get_screen(), provider, 800)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+        scroller.add(box)
+        self.add(scroller)
+
+        head = Gtk.Label(xalign=0.0)
+        head.set_markup(
+            "<span size='xx-large' weight='bold'>My Prays</span>\n"
+            "<span size='small' color='#8a8a93'>Prayer times · adhan alarm · hadith of the day</span>")
+        box.pack_start(head, False, False, 0)
+
+        box.pack_start(self.build_location(), False, False, 0)
+        box.pack_start(self.build_timezone(), False, False, 0)
+        box.pack_start(self.build_times(), False, False, 0)
+        box.pack_start(self.build_alarm(), False, False, 0)
+        box.pack_start(self.build_hadith(), False, False, 0)
+
+        foot = Gtk.Label(xalign=0.0, wrap=True)
+        foot.set_markup(
+            "<span size='small' color='#8a8a93'>All times are computed "
+            "offline from these coordinates for your system clock. Only "
+            "\"Detect\" uses your IP (same guarded rules as prayer-locate).</span>")
+        box.pack_start(foot, False, False, 0)
+
+        self.load_state()
+        self.pick_hadith()
+        self.refresh_times()
+        GLib.timeout_add(1000, self.tick_countdown)
+        GLib.timeout_add(30000, self.refresh_times)
+        self.connect("destroy", Gtk.main_quit)
+
+    def build_location(self):
+        frm = Gtk.Frame(label=" Location ")
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(12)
+
+        lbl_c = Gtk.Label(label="Country", xalign=0.0)
+        self.country_combo = Gtk.ComboBoxText()
+        for country, _ in COUNTRIES:
+            self.country_combo.append_text(country)
+        self.country_combo.connect("changed", self.on_country_changed)
+
+        lbl_i = Gtk.Label(label="City", xalign=0.0)
+        self.city_combo = Gtk.ComboBoxText()
+        self.city_combo.connect("changed", self.on_city_changed)
+
+        lbl_la = Gtk.Label(label="Latitude", xalign=0.0)
+        self.lat_spin = Gtk.SpinButton.new_with_range(-90.0, 90.0, 0.0001)
+        self.lat_spin.set_digits(5)
+        self.lat_spin.set_width_chars(10)
+        lbl_lo = Gtk.Label(label="Longitude", xalign=0.0)
+        self.lon_spin = Gtk.SpinButton.new_with_range(-180.0, 180.0, 0.0001)
+        self.lon_spin.set_digits(5)
+        self.lon_spin.set_width_chars(10)
+
+        self.detect_lbl = Gtk.Label(xalign=0.0, wrap=True)
+        self.detect_lbl.set_markup("<span size='small' color='#8a8a93'></span>")
+
+        row_btns = Gtk.Box(spacing=8)
+        detect = Gtk.Button(label="Detect")
+        detect.connect("clicked", self.on_detect)
+        save = Gtk.Button(label="Save location")
+        save.connect("clicked", self.on_save_location)
+        row_btns.pack_start(detect, False, False, 0)
+        row_btns.pack_start(save, False, False, 0)
+
+        grid.attach(lbl_c, 0, 0, 1, 1)
+        grid.attach(self.country_combo, 1, 0, 2, 1)
+        grid.attach(lbl_i, 0, 1, 1, 1)
+        grid.attach(self.city_combo, 1, 1, 2, 1)
+        grid.attach(lbl_la, 0, 2, 1, 1)
+        grid.attach(self.lat_spin, 1, 2, 1, 1)
+        grid.attach(lbl_lo, 2, 2, 1, 1)
+        grid.attach(self.lon_spin, 3, 2, 1, 1)
+        grid.attach(row_btns, 0, 3, 2, 1)
+        grid.attach(self.detect_lbl, 0, 4, 4, 1)
+
+        frm.add(grid)
+        return frm
+
+    def build_timezone(self):
+        frm = Gtk.Frame(label=" Clock / Timezone ")
+        self.tz_lbl = Gtk.Label(xalign=0.0, wrap=True)
+        self.tz_lbl.set_margin_start(12)
+        self.tz_lbl.set_margin_end(12)
+        self.tz_lbl.set_margin_top(10)
+        self.tz_lbl.set_margin_bottom(12)
+        frm.add(self.tz_lbl)
+        return frm
+
+    def build_times(self):
+        frm = Gtk.Frame(label=" Today's times ")
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        grid = Gtk.Grid(column_spacing=16, row_spacing=2)
+        self.time_lbl = {}
+        self.time_txt = {}
+        for i, n in enumerate(NAMES):
+            l = Gtk.Label(xalign=0.0)
+            l.set_markup(n)
+            t = Gtk.Label(xalign=1.0)
+            self.time_lbl[n] = l
+            self.time_txt[n] = t
+            grid.attach(l, 0, i, 1, 1)
+            grid.attach(t, 1, i, 1, 1)
+        self.next_lbl = Gtk.Label(xalign=0.0)
+        v.pack_start(grid, False, False, 0)
+        v.pack_start(self.next_lbl, False, False, 0)
+        v.set_margin_start(12)
+        v.set_margin_end(12)
+        v.set_margin_top(10)
+        v.set_margin_bottom(12)
+        frm.add(v)
+        return frm
+
+    def build_alarm(self):
+        frm = Gtk.Frame(label=" Adhan alarm ")
+        grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(12)
+
+        m = Gtk.Label(label="Master alarm (all prayers)", xalign=0.0)
+        self.master = Gtk.Switch()
+        grid.attach(m, 0, 0, 1, 1)
+        grid.attach(self.master, 1, 0, 1, 1)
+
+        self.sw = {}
+        for i, n in enumerate(NAMES, start=1):
+            lbl = Gtk.Label(label=n + (" (optional)" if n == "Duha" else ""), xalign=0.0)
+            sw = Gtk.Switch()
+            self.sw[n] = sw
+            grid.attach(lbl, 0, i, 1, 1)
+            grid.attach(sw, 1, i, 1, 1)
+
+        self.master.connect("notify::active", self.save_alarms)
+        for n in NAMES:
+            self.sw[n].connect("notify::active", self.save_alarms)
+        frm.add(grid)
+        return frm
+
+    def build_hadith(self):
+        frm = Gtk.Frame(label=" Hadith of the day ")
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.hadith_lbl = Gtk.Label(xalign=0.0, wrap=True)
+        self.hadith_lbl.set_line_wrap(True)
+        self.hadith_lbl.set_margin_start(12)
+        self.hadith_lbl.set_margin_end(12)
+        self.hadith_lbl.set_margin_top(10)
+        another = Gtk.Button(label="Another hadith")
+        another.connect("clicked", lambda *a: self.pick_hadith())
+        v.pack_start(self.hadith_lbl, False, False, 0)
+        v.pack_start(another, False, False, 0)
+        v.set_margin_bottom(12)
+        frm.add(v)
+        return frm
+
+    def on_country_changed(self, _w):
+        ci = self.country_combo.get_active()
+        if ci < 0:
+            return
+        self.city_combo.handler_block_by_func(self.on_city_changed)
+        self.city_combo.remove_all()
+        for city, _, _ in COUNTRIES[ci][1]:
+            self.city_combo.append_text(city)
+        self.city_combo.set_active(0)
+        self.city_combo.handler_unblock_by_func(self.on_city_changed)
+        self.on_city_changed(None)
+
+    def on_city_changed(self, _w):
+        ci = self.country_combo.get_active()
+        if ci < 0:
+            return
+        ni = self.city_combo.get_active()
+        if ni < 0:
+            return
+        _, lat, lon = COUNTRIES[ci][1][ni]
+        self.lat_spin.set_value(lat)
+        self.lon_spin.set_value(lon)
+
+    def on_save_location(self, _b):
+        lat = self.lat_spin.get_value()
+        lon = self.lon_spin.get_value()
+        city = "Custom"
+        ci = self.country_combo.get_active()
+        ni = self.city_combo.get_active()
+        if ci >= 0 and ni >= 0:
+            cname, clat, clon = COUNTRIES[ci][1][ni]
+            if abs(clat - lat) < 0.01 and abs(clon - lon) < 0.01:
+                city = cname
+        write_keys({"LAT": "%.5f" % lat, "LON": "%.5f" % lon, "CITY": city})
+        self.detect_lbl.set_markup(
+            "<span size='small' color='#9ede8a'>Saved: %s (%.4f, %.4f). "
+            "The running daemon picks it up at the next event.</span>"
+            % (city, lat, lon))
+        self.refresh_times()
+
+    def on_detect(self, _b):
+        try:
+            out = subprocess.run([LOCATE_BIN, "--force"], capture_output=True,
+                                 text=True, timeout=25)
+            line = (out.stdout or out.stderr or "").strip().splitlines()
+            msg = line[-1] if line else "detect failed"
+        except Exception as exc:
+            msg = "detect failed: %s" % exc
+        self.detect_lbl.set_markup("<span size='small' color='%s'>%s</span>"
+                                   % ("#e5c07b" if "skipped" in msg
+                                      else "#9ede8a", GLib.markup_escape_text(msg)))
+        cfg = load_cfg()
+        self.lat_spin.set_value(cfg.get("lat", 33.514))
+        self.lon_spin.set_value(cfg.get("lon", 36.277))
+        self.refresh_times()
+
+    def save_alarms(self, _s=None, _p=None):
+        updates = {"ALARM": 1 if self.master.get_active() else 0}
+        for n in NAMES:
+            updates[n.upper() + "_ENABLED"] = 1 if self.sw[n].get_active() else 0
+        write_keys(updates)
+
+    def load_state(self):
+        cfg = load_cfg()
+        self.lat_spin.set_value(cfg.get("lat", 33.514))
+        self.lon_spin.set_value(cfg.get("lon", 36.277))
+
+        self.master.handler_block_by_func(self.save_alarms)
+        self.master.set_active(bool(cfg.get("alarm", True)))
+        self.master.handler_unblock_by_func(self.save_alarms)
+        for n in NAMES:
+            key = n.lower() + "_enabled"
+            sw = self.sw[n]
+            sw.handler_block_by_func(self.save_alarms)
+            sw.set_active(bool(cfg.get(key, True)))
+            sw.handler_unblock_by_func(self.save_alarms)
+
+        city = str(cfg.get("city", ""))
+        best = None
+        for ci, (country, cities) in enumerate(COUNTRIES):
+            for ni, (cname, clat, clon) in enumerate(cities):
+                if cname.lower() in city.lower() or city.lower() in cname.lower():
+                    best = (ci, ni)
+                    break
+            if best:
+                break
+        if best is None:
+            clat, clon = cfg.get("lat", 33.514), cfg.get("lon", 36.277)
+            for ci, (country, cities) in enumerate(COUNTRIES):
+                for ni, (cname, clat2, clon2) in enumerate(cities):
+                    if (abs(clat - clat2) + abs(clon - clon2)) < 0.05:
+                        best = (ci, ni)
+                        break
+                if best:
+                    break
+        if best:
+            self.country_combo.set_active(best[0])
+            self.city_combo.set_active(best[1])
+
+        now = datetime.now().astimezone()
+        tz = getattr(now.tzinfo, "key", str(now.tzinfo))
+        off = now.utcoffset().total_seconds() / 3600
+        sign = "+" if off >= 0 else "-"
+        self.tz_lbl.set_markup(
+            "<b>%s</b> (%s%02d:%02d)<br/>"
+            "<span size='small' color='#8a8a93'>The adhan follows your "
+            "system clock — make sure this machine shows the time where you "
+            "are.</span>"
+            % (tz, sign, int(abs(off)), int((abs(off) % 1) * 60)))
+
+    def compute_now(self):
+        cfg = load_cfg()
+        now = datetime.now()
+        evs = prayer_mod()["events_for"](now.date(), cfg)
+        self.evs = evs
+        self.nxt = None
+        for n, t in evs:
+            if t > now:
+                self.nxt = (n, t)
+                return
+        evs = prayer_mod()["events_for"](now.date() + timedelta(days=1), cfg)
+        self.evs = evs
+        self.nxt = evs[0]
+
+    def refresh_times(self, *_a):
+        try:
+            self.compute_now()
+        except Exception:
+            return True
+        accent_color = accent()
+        for n, t in self.evs:
+            lbl = self.time_lbl.get(n)
+            txt = self.time_txt.get(n)
+            if not lbl or not txt:
+                continue
+            is_next = self.nxt and n == self.nxt[0]
+            if is_next:
+                lbl.set_markup("<b><span foreground='#%s'>%s</span></b>"
+                               % (accent_color, n))
+                txt.set_markup("<b><span foreground='#%s'>%s</span></b>"
+                               % (accent_color, t.strftime("%H:%M")))
+            else:
+                lbl.set_markup(n)
+                txt.set_text(t.strftime("%H:%M"))
+        return True
+
+    def tick_countdown(self):
+        if self.nxt:
+            n, t = self.nxt
+            d = (t - datetime.now()).total_seconds()
+            if d < 0:
+                self.refresh_times()
+                return True
+            h = int(d // 3600)
+            m = int((d % 3600) // 60)
+            s = int(d % 60)
+            self.next_lbl.set_markup(
+                "<b>Next</b>: %s in <b>%d:%02d:%02d</b>"
+                % (n, h, m, s))
+        else:
+            self.next_lbl.set_text("")
+        return True
+
+    def pick_hadith(self, *_a):
+        hadiths = load_hadiths()
+        if not hadiths:
+            self.hadith_lbl.set_markup(
+                "<i>No hadiths found — add ~/.config/prayer/hadiths.json</i>")
+            return
+        h = random.choice(hadiths)
+        ar = GLib.markup_escape_text(str(h.get("ar", "")))
+        en = GLib.markup_escape_text(str(h.get("en", "")))
+        san = GLib.markup_escape_text(str(h.get("sanad", "")))
+        self.hadith_lbl.set_markup(
+            "<span size='large'>%s</span>\n\n%s\n\n"
+            "<span size='small' color='#8a8a93'>%s</span>" % (ar, en, san))
+
+
+if __name__ == "__main__":
+    win = MyPrays()
+    win.show_all()
+    Gtk.main()
