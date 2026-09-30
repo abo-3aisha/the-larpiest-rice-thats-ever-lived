@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""screen-rec-check — diagnose WHY a screen recording "looks bad" despite a
+high nominal FPS. Output is English (UI rule).
+
+Usage:
+    screen-rec-check [file.mp4]        (defaults to newest / the VFR cache)
+
+Reports:
+  - container: nominal FPS, resolution, codec, bitrate
+  - truth:     REAL unique (visibly different) frames per second
+  - content:   how MUCH of the clip actually had motion. A static desktop
+               rightfully produces LOW unique fps — that is NOT the recorder
+               failing, and unique-fps only means something during motion.
+  - per-second plot of unique fps
+  - verdict:   static content / capture fine / capture bottleneck
+
+Requires: ffmpeg + ffprobe in PATH.
+"""
+import json
+import os
+import subprocess
+import sys
+
+W, H = 64, 36          # downscale size for the diff (fast, accurate enough)
+K = W * H
+MAX_FRAMES = 60000     # cap analysis time on huge recordings
+DIFF_TOL = 3
+UNIQUE_SENS = 0.01     # fraction of pixels changed -> frame counts as "unique"
+MOTION_SENS = 0.02     # fraction of pixels changed -> a second counts as motion
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def meta(path):
+    m = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries",
+             "stream=avg_frame_rate,r_frame_rate,width,height,codec_name,profile",
+             "-show_entries", "format=duration,bit_rate",
+             "-of", "json", path])
+    try:
+        j = json.loads(m.stdout)
+        s = j["streams"][0]
+        f = j["format"]
+        w, h = s.get("width"), s.get("height")
+        arf = s.get("avg_frame_rate")
+        nom = float(arf.split("/")[0]) / float(arf.split("/")[1]) if "/" in arf else 0.0
+        dur = float(f.get("duration", 0) or 0)
+        size = os.path.getsize(path)
+        return {
+            "nom": round(nom, 3), "res": f"{w}x{h}" if w else "?",
+            "codec": s.get("codec_name", "?"), "profile": s.get("profile", "?"),
+            "dur": round(dur, 2), "bps": size * 8 / dur if dur else 0,
+            "size": size,
+        }
+    except Exception:
+        print(f"cannot read metadata from {path}")
+        sys.exit(1)
+
+
+def analyze(path, nom):
+    total_frames = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+         "-show_entries", "stream=nb_read_frames", "-of", "default=nw=1:nokey=1",
+         path], text=True).strip()
+    try:
+        total_frames = int(total_frames)
+    except Exception:
+        total_frames = None
+    if not total_frames:
+        return None
+    step = max(1, total_frames // MAX_FRAMES)
+    proc = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-i", path,
+         "-vf", f"scale={W}:{H},format=gray,select=not(mod(n\\,{step}))",
+         "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    prev = None
+    sec_unique = {}          # sec -> unique frames
+    sec_motion = {}          # sec -> max changed-fraction
+    idx = 0
+    uniq = 0
+    while True:
+        buf = proc.stdout.read(K)
+        if len(buf) < K:
+            break
+        s = int((idx * step) / (nom or 60))
+        if prev is not None:
+            changed = sum(1 for a, c in zip(buf, prev) if abs(a - c) > DIFF_TOL)
+            frac = changed / K
+            sec_motion[s] = max(sec_motion.get(s, 0.0), frac)
+            if changed > K * UNIQUE_SENS:
+                uniq += 1
+                sec_unique[s] = sec_unique.get(s, 0) + 1
+        prev = buf
+        idx += 1
+    proc.stdout.close()
+    proc.wait()
+    return {
+        "total": total_frames, "sampled": idx * step, "step": step,
+        "unique": uniq, "sec_unique": sec_unique, "sec_motion": sec_motion,
+    }
+
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    cache = os.path.expanduser("~/.cache/screen-rec-last.vfr.mp4")
+    if not path or not os.path.exists(path):
+        if os.path.exists(cache):
+            path = cache
+        else:
+            d = os.path.expanduser("~/Videos/Recordings")
+            fs = sorted((os.path.join(d, f) for f in os.listdir(d)) if os.path.isdir(d) else [], key=os.path.getmtime)
+            path = fs[-1]
+    if not path or not os.path.exists(path):
+        print("no recording found")
+        sys.exit(1)
+    is_vfr = os.path.abspath(path) == os.path.abspath(cache)
+    m = meta(path)
+    r = analyze(path, m["nom"])
+    print("=" * 62)
+    print(f"ANALYSIS: {os.path.basename(path)}")
+    print(f"  type           : {'ORIGINAL VFR capture (pre-CFR) - truth' if is_vfr else 'CFR output, padded'}")
+    print(f"  file size      : {m['size']/1048576:.1f} MB")
+    print(f"  resolution     : {m['res']}  ({m['codec']} {m['profile']})")
+    print(f"  nominal FPS    : {m['nom']}   duration {m['dur']}s")
+    print(f"  container kbps : {m['bps']/1000:.0f}")
+    if not r:
+        print("  (analysis skipped on this file)")
+        return
+    du = m["dur"]
+    real = r["unique"] / du if du else 0
+    dup = 100 * (1 - r["unique"] / r["total"]) if r["total"] else 0
+    best_sec = max(r["sec_unique"].values()) if r["sec_unique"] else 0
+    motion_secs = [s for s, f in r["sec_motion"].items() if f >= MOTION_SENS]
+    cov = len(motion_secs) / du if du else 0
+    # real fps counted ONLY during seconds that genuinely had motion
+    muniq = sum(r["sec_unique"].get(s, 0) for s in motion_secs)
+    mreal = muniq / len(motion_secs) if motion_secs else 0
+    print("-" * 62)
+    print(f"  TOTAL frames       : {r['total']}  (sampled {r['sampled']})")
+    print(f"  REAL unique frames : {r['unique']}  ->  {real:.1f} real fps")
+    print(f"  CFR padding        : {dup:.0f}% repeats (nominal {m['nom']:.0f} vs {real:.1f} real)")
+    print(f"  best single second : {best_sec} real fps")
+    print(f"  motion coverage    : {cov*100:.0f}% of the clip had real motion "
+          f"({len(motion_secs)}/{du:.0f}s, threshold {MOTION_SENS*100:.0f}% px)")
+    if motion_secs:
+        print(f"  real fps DURING motion : {mreal:.1f}/s (this is the honest number)")
+    # per-second plot (last 40s)
+    if r["sec_unique"]:
+        lo, hi = max(0, int(du) - 40), int(du)
+        print("-" * 62)
+        print("  per-second plot  (# = real unique frames;  M = motion that second)")
+        for s in range(lo, hi):
+            v = r["sec_unique"].get(s, 0)
+            bar = "#" * min(48, v) if v else ""
+            tag = " M" if r["sec_motion"].get(s, 0.0) >= MOTION_SENS else "  "
+            print(f"  {s:>5}s | {bar:<48}{tag}{v}")
+    print("-" * 62)
+    print("  VERDICT:")
+    if cov < 0.10:
+        print("   - Mostly STATIC content: low unique-fps is expected and correct.")
+        print("     The recorder was NOT choking (a desktop only changes when you")
+        print("     move something). To truly test capture, record a fullscreen")
+        print("     video or the game itself for 10-20s, then re-run this tool.")
+    elif mreal >= 45:
+        print("   - Capture is FINE: during real-motion seconds the recorder")
+        print("     delivered ~%.0f unique fps. Any 'lag' is CFR padding from" % mreal)
+        print("     a mostly-static screen, not a capture loss.")
+    elif mreal >= 25:
+        print("   - Capture acceptable: ~%.0f unique fps during motion (best second %d)." % (mreal, best_sec))
+    else:
+        print("   - Capture bottleneck: even during real-motion seconds only")
+        print("     ~%.0f unique fps arrived -> frames are lost before encode." % mreal)
+        print("     Fix candidates: play/upload the video or lower capture res,")
+        print("     or capture with a different backend and compare.")
+    print("   - Playback hint: a high-fps H.264 with software decode stutters on a")
+    print("     weak CPU. Watch with mpv --hwdec=auto (hardware decode).")
+
+
+if __name__ == "__main__":
+    main()

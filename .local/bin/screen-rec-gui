@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+# screen-rec-gui — simple keyboard recording-options picker (SUPER+S).
+# Up/Down   = move between rows     Right/Left = change that row's value
+# Bitrate row = mouse slider (Gtk.Scale). Esc = cancel, Return = save.
+# Persists to ~/.config/screen-rec.conf, read by ~/.local/bin/screen-rec.
+import os
+import re
+import sys
+import time
+import warnings
+import subprocess
+
+warnings.filterwarnings("ignore", module="gi")
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk
+
+HOME = os.path.expanduser("~")
+CONF = HOME + "/.config/screen-rec.conf"
+THEME = HOME + "/.config/hypr/theme.lua"
+PIDF = HOME + "/.cache/screen-rec.pid"
+MODEF = HOME + "/.cache/screen-rec.mode"
+REC = HOME + "/.local/bin/screen-rec"
+
+
+def rec_active():
+    try:
+        return subprocess.run(["pgrep", "-F", PIDF], capture_output=True).returncode == 0
+    except Exception:
+        return False
+
+
+def rec_mode():
+    try:
+        return open(MODEF).read().strip()
+    except Exception:
+        return ""
+
+
+def load_conf():
+    d = {"CODEC": "avc", "FPS": "60", "BITRATE": "1000000", "AUDIO": "device", "GPU": "auto"}
+    if os.path.exists(CONF):
+        for line in open(CONF):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip()
+    return d
+
+
+def save_conf(d):
+    with open(CONF, "w") as fh:
+        for k in ("CODEC", "FPS", "BITRATE", "AUDIO", "GPU"):
+            fh.write(f"{k}={d[k]}\n")
+
+
+def theme_accent():
+    try:
+        m = re.search(r'accent\s*=\s*"([0-9a-fA-F]{6})"', open(THEME).read())
+        return "#" + m.group(1)
+    except Exception:
+        return "#00d4f5"
+
+
+CODEC_OPTS = [("avc", "AVC (H.264)"), ("hevc", "HEVC (H.265)")]
+FPS_OPTS = [
+    ("auto", "Auto (match screen)"),
+    ("30", "30 fps"),
+    ("60", "60 fps"),
+    ("90", "90 fps"),
+    ("120", "120 fps"),
+]
+AUDIO_OPTS = [
+    ("mic", "Mic only"),
+    ("both", "Mic + Desktop"),
+    ("device", "Desktop only (no mic)"),
+]
+GPU_OPTS = [
+    ("auto", "Auto (smart)"),
+    ("nvidia", "NVIDIA (NVENC)"),
+    ("amd", "AMD (VAAPI)"),
+    ("intel", "Intel (VAAPI)"),
+]
+BITRATE_MIN, BITRATE_MAX = 4, 60  # Mbps human units
+
+
+def mbps_to_bitrate_str(m):
+    # human-size format (wl-screenrec): "0.5 MB" .. "3.125 MB" (bytes = n*1e6)
+    return f"{m / 8:g} MB"  # 8 Mbps -> "1 MB"
+
+
+def parse_bitrate_mbps(s):
+    try:
+        import re
+        m = re.match(r"\s*([0-9.]+)\s*([a-zA-Z]*)", s or "")
+        if not m:
+            return 8
+        num = float(m.group(1))
+        mult = {"b": 1, "kb": 1000, "mb": 1e6, "gb": 1e9,
+                "kib": 1024, "mib": 1048576}.get(m.group(2).lower(), 1e6)
+        return round(num * mult / 125000)
+    except Exception:
+        return 8
+
+
+class RecGui:
+    def __init__(self):
+        self.d = load_conf()
+        self.idx = 0
+        self.rows = []  # (name_label, value_widget, kind, current_value)
+
+        self.win = Gtk.Window(title="Recording Options")
+        self.win.set_default_size(420, 260)
+        self.win.set_resizable(False)
+        self.win.set_position(Gtk.WindowPosition.CENTER)
+        self.win.connect("key-press-event", self.on_key)
+        self.win.connect("destroy", lambda *_: Gtk.main_quit())
+
+        acc = theme_accent()
+        css = Gtk.CssProvider()
+        cssdata = (
+            "window { background: #161617; }"
+            "label.name { color: #8a8d95; font-size: 13px; padding: 2px 4px; }"
+            "label.val { color: #ebde98; font-size: 14px; font-weight: bold; padding: 2px 8px; }"
+            "label.rowsel { background: %s; color: #101012; border-radius: 6px; }"
+            "label.title { font-size: 16px; color: %s; font-weight: bold; }"
+            "button { color: #ebde98; background: #232326; border: 1px solid #33333a; }"
+            "button:hover { border-color: %s; }"
+            "scale trough { background: #232326; min-height: 6px; }"
+            "scale highlight { background: %s; }"
+            "scale slider { background: %s; border-radius: 10px; }"
+            "label#line { font-size: 11px; padding-bottom: 6px; }"
+            "label#live { color: #d8a028; }"
+            "label#idle { color: #8a8d95; }"
+        ) % (acc, acc, acc, acc, acc)
+        css.load_from_data(cssdata.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.set_margin_top(18)
+        box.set_margin_bottom(14)
+        self.win.add(box)
+
+        title = Gtk.Label(label="Recording Options")
+        title.get_style_context().add_class("title")
+        box.add(title)
+
+        status = Gtk.Label(label="", xalign=0.0)
+        status.get_style_context().add_class("name")
+        if rec_active():
+            status.set_text(f"RECORDING NOW · {rec_mode() or 'active'} — Save restarts it")
+            status.set_name("live")
+        else:
+            status.set_text("Recorder idle — settings apply on next start")
+            status.set_name("idle")
+        status.get_style_context().add_class("line")
+        box.add(status)
+
+        grid = Gtk.Grid(column_spacing=16, row_spacing=8)
+        box.add(grid)
+
+        self.slider = None
+        self.bit_label = None
+
+        # Codec
+        self._add_row(grid, 0, "Codec", "CODEC", self._val_codec)
+        self._add_row(grid, 1, "Framerate", "FPS", self._val_fps)
+        self._add_row(grid, 2, "GPU", "GPU", self._val_gpu)
+        self._add_row(grid, 3, "Audio", "AUDIO", self._val_audio)
+
+        # Bitrate — mouse slider
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        name = Gtk.Label(label="Bitrate", xalign=0.0)
+        name.get_style_context().add_class("name")
+        name.set_size_request(80, -1)
+        self.bit_label = Gtk.Label(label="", xalign=0.0)
+        self.bit_label.get_style_context().add_class("val")
+        adj = Gtk.Adjustment(value=parse_bitrate_mbps(self.d["BITRATE"]),
+                             lower=BITRATE_MIN, upper=BITRATE_MAX, step_increment=1, page_increment=5)
+        self.slider = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj)
+        self.slider.set_digits(0)
+        self.slider.set_hexpand(True)
+        self.slider.set_can_focus(False)
+        self.slider.connect("value-changed", lambda s: self._paint())
+        self._paint()
+        row.pack_start(name, False, False, 0)
+        row.pack_start(self.bit_label, False, False, 0)
+        row.pack_start(self.slider, True, True, 0)
+        grid.attach(row, 0, 4, 2, 1)
+        self.bit_slider = self.slider
+
+        sep = Gtk.Separator()
+        box.pack_start(sep, True, True, 0)
+
+        btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btns.set_halign(Gtk.Align.END)
+        save = Gtk.Button(label="Save")
+        save.connect("clicked", lambda *_: self._save())
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: self.win.destroy())
+        btns.pack_end(save, False, False, 0)
+        btns.pack_end(cancel, False, False, 0)
+        box.pack_start(btns, False, False, 0)
+
+        self._paint()
+        self.win.show_all()
+        self.win.present()
+
+    # ---- helpers ----
+    def _val_codec(self, i):
+        return CODEC_OPTS[i][1]
+
+    def _val_fps(self, i):
+        return FPS_OPTS[i][1]
+
+    def _val_audio(self, i):
+        return AUDIO_OPTS[i][1]
+
+    def _val_gpu(self, i):
+        return GPU_OPTS[i][1]
+
+    def _idx_of(self, kind):
+        v = self.d[kind]
+        try:
+            return max(0, [o[0] for o in self._opts(kind)].index(v))
+        except (ValueError, KeyError):
+            return 0
+
+    def _opts(self, kind):
+        return {"CODEC": CODEC_OPTS, "FPS": FPS_OPTS, "AUDIO": AUDIO_OPTS, "GPU": GPU_OPTS}[kind]
+
+    def _add_row(self, grid, r, text, key, vfun):
+        # store kind + key for refresh in self.rows; value label created here
+        name = Gtk.Label(label=text, xalign=0.0)
+        name.get_style_context().add_class("name")
+        name.set_size_request(80, -1)
+        val = Gtk.Label(label="", xalign=0.0)
+        val.get_style_context().add_class("val")
+        self.rows.append((key, vfun, val))
+        grid.attach(name, 0, r, 1, 1)
+        grid.attach(val, 1, r, 1, 1)
+        self._paint()
+
+    def _paint(self):
+        for i, (key, vfun, val) in enumerate(self.rows):
+            cur = self._idx_of(key)
+            val.set_text(vfun(cur))
+            ctx = val.get_style_context()
+            if i == self.idx:
+                ctx.add_class("rowsel")
+            else:
+                ctx.remove_class("rowsel")
+        if self.slider is None or self.bit_label is None:
+            return
+        m = int(self.slider.get_value())
+        self.bit_label.set_text(f"{m} Mbps")
+        if self.idx == 4:
+            self.bit_label.get_style_context().add_class("rowsel")
+        else:
+            self.bit_label.get_style_context().remove_class("rowsel")
+
+    def _cycle(self, key, step):
+        opts = self._opts(key)
+        cur = self._idx_of(key)
+        nxt = (cur + step) % len(opts)
+        self.d[key] = opts[nxt][0]
+        self._paint()
+
+    def on_key(self, w, ev):
+        key = ev.keyval
+        if key == Gdk.KEY_Up:
+            self.idx = (self.idx - 1) % 5
+            self._paint()
+            return True
+        if key == Gdk.KEY_Down:
+            self.idx = (self.idx + 1) % 5
+            self._paint()
+            return True
+        if key == Gdk.KEY_Right:
+            if self.idx == 4:  # bitrate -> slider up
+                self.slider.set_value(min(self.slider.get_value() + 1, BITRATE_MAX))
+            else:
+                self._cycle(self.rows[self.idx][0], 1)
+            return True
+        if key == Gdk.KEY_Left:
+            if self.idx == 4:
+                self.slider.set_value(max(self.slider.get_value() - 1, BITRATE_MIN))
+            else:
+                self._cycle(self.rows[self.idx][0], -1)
+            return True
+        if key in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._save()
+            return True
+        if key == Gdk.KEY_Escape:
+            self.win.destroy()
+            return True
+        return False
+
+    def _apply_record(self, was_active):
+        if not was_active:
+            return
+        notify = ["notify-send", "-a", "Screen record", "-i", "media-record"]
+        subprocess.Popen([REC])          # toggle OFF the live recording
+        for _ in range(50):              # wait until it fully stopped
+            if not rec_active():
+                break
+            time.sleep(0.2)
+        if rec_active():
+            subprocess.Popen(notify + ["Could not restart recording",
+                                       "Old session kept running — new settings will apply on next start"])
+            return
+        subprocess.Popen([REC])          # toggle ON with the freshly saved conf
+
+    def _save(self):
+        m = int(self.slider.get_value())
+        was_active = rec_active()
+        self.d["BITRATE"] = mbps_to_bitrate_str(m)
+        save_conf(self.d)
+        subprocess.Popen(["notify-send", "-a", "Screen record", "-i", "media-record",
+                          "Recording options saved",
+                          f"{self.d['CODEC']} · {self.d['FPS']}fps · {m} Mbps · gpu={self.d['GPU']} · audio={self.d['AUDIO']}"])
+        self._apply_record(was_active)
+        self.win.destroy()
+
+
+if __name__ == "__main__":
+    try:
+        RecGui()
+        Gtk.main()
+    except Exception as e:
+        import traceback
+        log = os.path.expanduser("~/.cache/screen-rec-gui.log")
+        with open(log, "a") as fh:
+            fh.write(traceback.format_exc())
+        subprocess.Popen(["notify-send", "-a", "Recording options", "-u", "critical",
+                          "GUI failed", f"{e} — see {log}"])

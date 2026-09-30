@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# swaync-action — run a quick-tile action after closing the control center.
+case "$1" in
+    screenshot)
+        swaync-client -cp >/dev/null 2>&1 || true
+        sleep 0.2
+        /home/abo3aisha/.local/bin/screenshot.sh output
+        ;;
+    record)
+        swaync-client -cp >/dev/null 2>&1 || true
+        sleep 0.2
+        /home/abo3aisha/.local/bin/screen-rec
+        ;;
+    *) exit 1 ;;
+esac

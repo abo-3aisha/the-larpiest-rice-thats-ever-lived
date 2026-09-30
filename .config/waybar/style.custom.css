@@ -15,11 +15,11 @@
 #custom-comm-layer:hover { color: @accent@; }
 #custom-weather { color: @fg_dim@; }
 #custom-weather:hover { color: @accent@; }
-#custom-wifi { color: @fg_dim@; }
+#custom-wifi { color: @accent@; }
 #custom-wifi:hover { color: @accent@; }
-#custom-wifi.off { color: #5b5f66; }
+#custom-wifi.off { color: @fg_dim@; opacity: 0.75; }
 #custom-wifi.off:hover { color: @accent@; }
-#custom-wifi.disconnected { color: @fg_dim@; }
+#custom-wifi.disconnected { color: @accent@; opacity: 0.8; }
 
 /* net speed (whole-device up/down, centered before the clock) */
 #custom-net-speed {
@@ -38,11 +38,11 @@
     margin: 1px 8px 1px 0px;
     padding: 0;
     background-repeat: no-repeat;
-    color: @fg_dim@;
+    color: @accent@;
     font-size: 9px;
 }
 #custom-battery:hover { color: @accent@; }
-#custom-battery.charging { color: @fg_dim@; }
+#custom-battery.charging { color: @accent@; }
 #custom-battery.critical { color: @error@; }
 #custom-battery label { font-size: 9px; padding: 0; }
 #custom-battery.b0 { background-image: url("/home/abo3aisha/.config/waybar/batt/g0.png"); }
@@ -247,3 +247,24 @@
 #custom-battery.b98.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r98.png"); }
 #custom-battery.b99.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r99.png"); }
 #custom-battery.b100.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r100.png"); }
+
+/* ===== charging bolt (bolt-indicator.sh) — appears ONLY while charging ===== */
+#custom-bolt {
+    padding: 0;
+    margin: 1px 3px 1px 0;
+    font-size: 15px;
+    color: transparent;
+    background: transparent;
+    min-width: 0;
+}
+#custom-bolt.charging { color: @accent@; }
+#custom-bolt.off { color: transparent; }
+
+/* ===== Material You tint (2026-09-26) ===== */
+#pulseaudio { color: @accent@; }
+#pulseaudio:hover { color: @accent@; }
+#custom-power { color: @accent@; }
+#custom-power:hover { color: @error@; }
+#tray { background: rgba(@accent_rgb@, 0.08); border-radius: 16px; padding: 0 10px; margin: 1px 2px; }
+#tray:hover { background: rgba(@accent_rgb@, 0.15); }
+

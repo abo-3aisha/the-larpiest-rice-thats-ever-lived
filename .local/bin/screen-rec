@@ -1,0 +1,363 @@
+#!/usr/bin/env sh
+# screen-rec — toggle screen recording (SUPER+N quick tile + SUPER+S options).
+# Options (codec/fps/bitrate/audio) come from ~/.config/screen-rec.conf — use
+# ~/.local/bin/screen-rec-gui (SUPER+S → Recording Options).
+# 1st try: wl-screenrec HARDWARE encode via Intel iGPU (forced --dri-device).
+# 2nd: wl-screenrec SOFTWARE (--no-hw). 3rd: wf-recorder.
+# "both" audio = desktop monitor + mic mixed into a null sink (pactl).
+# Errors logged to ~/.cache/screen-rec.err.log for diagnosis.
+DIR="$HOME/Videos/Recordings"
+PID="$HOME/.cache/screen-rec.pid"
+PATHF="$HOME/.cache/screen-rec.path"
+FPSF="$HOME/.cache/screen-rec.fps"
+MODEF="$HOME/.cache/screen-rec.mode"
+ERR="$HOME/.cache/screen-rec.err.log"
+MIXF="$HOME/.cache/screen-rec.mix"
+CONF="$HOME/.config/screen-rec.conf"
+mkdir -p "$DIR"
+
+# --- load recording options (defaults if no conf) ---
+CODEC=avc; FPS=auto; BITRATE="1 MB"; AUDIO=device; GPU=auto
+[ -f "$CONF" ] && . "$CONF"
+case "$GPU" in nvidia|intel|amd|auto) : ;; *) GPU=auto ;; esac
+case "$BITRATE" in
+    *[!0-9]*) : ;;              # already a human-size string like "1 MB"
+    "") BITRATE="1 MB" ;;
+    *) BITRATE="${BITRATE} B" ;;  # bare byte-count legacy -> "NNNN B"
+esac
+
+# --- effective FPS: match the LIVE refresh rate of the focused display.
+# "auto" -> use it; a picked number is capped to it (recording 120 on a 60Hz
+# panel is WORSE, not smoother — frame pacing/halving).
+SCREEN_HZ=60
+if command -v hyprctl >/dev/null 2>&1; then
+    SCREEN_HZ="$(hyprctl -j monitors 2>/dev/null | python3 -c '
+import json, sys
+try:
+    m = json.load(sys.stdin)
+    c = next((x for x in m if x.get("focused")), m[0] if m else None)
+    r = int(round(c["refreshRate"])) if c and c.get("refreshRate") else 0
+    print(r or "")
+except Exception:
+    pass')"
+fi
+[ -z "$SCREEN_HZ" ] && SCREEN_HZ=60
+case "$FPS" in
+    auto|"") FPS="$SCREEN_HZ" ;;          # follow the screen
+    *[!0-9]*) FPS="$SCREEN_HZ" ;;         # garbage conf -> follow the screen
+esac
+[ "$FPS" -gt "$SCREEN_HZ" ] 2>/dev/null && FPS="$SCREEN_HZ"
+echo "$FPS" > "$FPSF"
+
+cleanup_audio() {
+    [ -f "$MIXF" ] || return 0
+    for id in $(cat "$MIXF" 2>/dev/null); do
+        pactl unload-module "$id" 2>/dev/null
+    done
+    rm -f "$MIXF"
+}
+
+unique_fps() {
+    # Count VISIBLY distinct frames (washout padded duplicates). Downscale to
+    # 48x27 gray, count consecutive frames that differ on >1% of pixels.
+    # Cheap enough for short clips; skip long ones.
+    nb="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of default=nw=1:nokey=1 "$1" 2>/dev/null)"
+    [ -n "$nb" ] && [ "$nb" -le 20000 ] || return 0
+    ffmpeg -v error -i "$1" -vf "scale=48:27,format=gray" -f rawvideo -pix_fmt gray - 2>/dev/null | \
+        python3 -c 'import sys
+K=48*27; prev=None; uniq=0; total=0
+while True:
+    buf=sys.stdin.buffer.read(K)
+    if len(buf)<K: break
+    total+=1
+    if prev is not None and sum(1 for a,b in zip(buf,prev) if abs(a-b)>3) > K*0.01:
+        uniq+=1
+    prev=buf
+d=0.0
+if total: d=100.0*(1-uniq/total if total else 0)
+print(f"{uniq}|{total}|{d:.0f}")'
+}
+
+stop_rec() {
+    [ ! -f "$PID" ] && { cleanup_audio; return 0; }
+    cleanup_audio
+    pid="$(cat "$PID" 2>/dev/null)"
+    [ -n "$pid" ] && kill -INT "$pid" 2>/dev/null
+    i=0
+    while [ $i -lt 10 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.3
+        i=$((i + 1))
+    done
+    kill -TERM "$pid" 2>/dev/null
+    sleep 0.3
+    kill -KILL "$pid" 2>/dev/null
+    path="$(cat "$PATHF" 2>/dev/null)"
+    fps="$(cat "$FPSF" 2>/dev/null)"
+    [ -n "$fps" ] || fps=60
+    mode="$(cat "$MODEF" 2>/dev/null)"
+    if [ -n "$path" ] && [ -s "$path" ] && command -v ffmpeg >/dev/null 2>&1; then
+        # keep the ORIGINAL capture for diagnosis (screen-rec-check analyzes it)
+        cp -f "$path" "$HOME/.cache/screen-rec-last.vfr.mp4" 2>/dev/null
+        cfr="$path.cfr.mp4"
+        case "$mode" in
+            wf-recorder*)
+                # wf-recorder -D -r N already wrote a strict CFR file -> only a
+                # lossless faststart copy for phone compatibility.
+                ffmpeg -y -v error -i "$path" -c copy -movflags +faststart "$cfr" 2>>"$ERR"
+                ;;
+            *)
+                # ROOT FIX (verified by test): a stream-copy remux does NOT
+                # change a VFR file's real frame rate — properties read the
+                # ORIGINAL stts, so "-c copy -r" did literally nothing.
+                # Re-encode to a STRICT CFR at the exact requested rate.
+                # Encoder order follows the SUPER+S GPU choice.
+                ok=""
+                first="h264_nvenc"; firstq="-cq 23"
+                if [ "$GPU" = intel ] || [ "$GPU" = amd ]; then
+                    first="h264_vaapi"; [ "$CODEC" = hevc ] && first="hevc_vaapi"
+                    firstq=""
+                else
+                    [ "$CODEC" = hevc ] && first="hevc_nvenc"
+                fi
+                if [ -n "$firstq" ]; then
+                    # nvenc — plain system-frame upload path
+                    ffmpeg -y -v error -i "$path" -c:v "$first" $firstq \
+                        -r "$fps" -fps_mode cfr -c:a copy \
+                        -movflags +faststart "$cfr" 2>>"$ERR"
+                else
+                    # intel VAAPI
+                    ffmpeg -y -v error -hwaccel vaapi -hwaccel_output_format vaapi \
+                        -vaapi_device /dev/dri/renderD128 -i "$path" \
+                        -c:v "$first" -global_quality 20 -r "$fps" -fps_mode cfr \
+                        -c:a copy -movflags +faststart "$cfr" 2>>"$ERR"
+                fi
+                [ -s "$cfr" ] && ok=1
+                if [ -z "$ok" ]; then
+                    rm -f "$cfr"
+                    venc="h264_vaapi"
+                    [ "$CODEC" = hevc ] && venc="hevc_vaapi"
+                    if [ -c /dev/dri/renderD128 ]; then
+                        if ffmpeg -y -v error -hwaccel vaapi -hwaccel_output_format vaapi \
+                            -vaapi_device /dev/dri/renderD128 -i "$path" \
+                            -c:v "$venc" -global_quality 20 -r "$fps" -fps_mode cfr \
+                            -c:a copy -movflags +faststart "$cfr" 2>>"$ERR"; then
+                            [ -s "$cfr" ] && ok=1
+                        fi
+                    fi
+                fi
+                if [ -z "$ok" ]; then
+                    rm -f "$cfr"
+                    ffmpeg -y -v error -i "$path" -c:v libx264 -crf 20 -preset veryfast \
+                        -r "$fps" -fps_mode cfr -pix_fmt yuv420p -c:a copy \
+                        -movflags +faststart "$cfr" 2>>"$ERR"
+                    [ -s "$cfr" ] && ok=1
+                fi
+                [ -z "$ok" ] && rm -f "$cfr"
+                ;;
+        esac
+        [ -s "$cfr" ] && mv -f "$cfr" "$path"
+    fi
+    if [ -n "$path" ] && [ -s "$path" ]; then
+        size="$(du -h "$path" 2>/dev/null | awk '{print $1}')"
+        extra=""
+        stat="$(unique_fps "$path")"
+        if [ -n "$stat" ]; then
+            u="$(echo "$stat" | cut -d'|' -f1)"
+            d="$(echo "$stat" | cut -d'|' -f3)"
+            extra=" — real ~${u} fps (${d}% dup)"
+        fi
+        notify-send -a "Screen record" -i media-record "Recording saved" \
+            "$(basename "$path") ($size)$extra — Videos/Recordings" 2>/dev/null
+    else
+        notify-send -a "Screen record" -u critical "Recording stopped" \
+            "Output file is empty/zero — see $ERR" 2>/dev/null
+    fi
+    rm -f "$PID" "$PATHF" "$FPSF" "$MODEF"
+}
+
+sleep_check() {
+    sleep 1
+    kill -0 "$1" 2>/dev/null
+}
+
+start_rec() {
+    if [ -f "$PID" ]; then
+        opid="$(cat "$PID" 2>/dev/null)"
+        if [ -n "$opid" ] && kill -0 "$opid" 2>/dev/null; then
+            stop_rec
+            return 0
+        fi
+        rm -f "$PID" "$PATHF" "$FPSF" "$MODEF"
+        cleanup_audio
+    fi
+
+    OUT="$(hyprctl -j monitors 2>/dev/null | python3 -c '
+import json, sys
+try:
+    m = json.load(sys.stdin)
+    c = next((x for x in m if x.get("focused")), m[0] if m else None)
+    print(c["name"] if c else "")
+except Exception:
+    pass')"
+    [ -z "$OUT" ] && OUT="$(hyprctl monitors 2>/dev/null | awk 'NR==1 && $1=="Monitor" {print $2}')"
+    [ -z "$OUT" ] && {
+        notify-send -a "Screen record" -u critical "Recording failed" "no monitor found" 2>/dev/null
+        return 1
+    }
+    out="$DIR/Recording-$(date +%Y-%m-%d_%H-%M-%S).mp4"
+    mode="hardware"
+
+    # --- audio source selection (raw PulseAudio source name for wf-recorder) ---
+    audio_args=""
+    audio_note=""
+    if command -v pactl >/dev/null 2>&1 && [ "$AUDIO" != "none" ]; then
+        SINK="$(pactl get-default-sink 2>/dev/null)"
+        MIC="$(pactl get-default-source 2>/dev/null)"
+        case "$AUDIO" in
+            mic)
+                [ -n "$MIC" ] && {
+                    audio_args="--audio=$MIC"
+                    audio_note="mic only"
+                }
+                ;;
+            device)
+                a="${SINK}.monitor"
+                [ -n "$SINK" ] && {
+                    audio_args="--audio=$a"
+                    audio_note="desktop"
+                }
+                ;;
+            both)
+                if [ -n "$SINK" ] && [ -n "$MIC" ]; then
+                    ids=""
+                    for m in \
+                        "module-null-sink sink_name=screenmix" \
+                        "module-loopback source=$SINK.monitor sink=screenmix latency_msec=40" \
+                        "module-loopback source=$MIC sink=screenmix latency_msec=40"; do
+                        id="$(pactl load-module $m 2>/dev/null)"
+                        [ -n "$id" ] && ids="$ids $id"
+                    done
+                    if [ -n "$ids" ]; then
+                        echo "$ids" > "$MIXF"
+                        audio_args="--audio=screenmix.monitor"
+                        audio_note="mic+desktop"
+                    fi
+                fi
+                ;;
+        esac
+    fi
+
+    # bitrate: human-size conf ("1 MB") -> plain bits/s for wf-recorder -p b:v=
+    BITV="$BITRATE"
+    if printf '%s' "$BITV" | grep -qE '^[0-9.]+[[:space:]]*[a-zA-Z]+$'; then
+        BITV="$(printf '%s' "$BITV" | python3 -c 'import sys,re
+m=re.match(r"\s*([0-9.]+)\s*([A-Za-z]*)\s*$", sys.stdin.read().strip())
+b={"b":1,"kb":1000,"mb":1000000,"gb":1000000000,"kib":1024,"mib":1048576}.get(m.group(2).lower(),1000000)
+print(int(float(m.group(1))*b*8))')"
+    fi
+
+    # --- recorder chain ---
+    # GPU preference decides the encoder ORDER (chosen in SUPER+S GUI):
+    #   nvidia -> NVIDIA NVENC first, then VAAPI, then software x264.
+    #   amd    -> VAAPI first (AMD radeonsi) via the DRI node, then NVENC, then x264.
+    #   intel  -> Intel VAAPI first, then NVIDIA, then software x264.
+    #   auto   -> NVIDIA first (strongest encoder on this laptop).
+    # Always the last-resort: wl-screenrec. `-D -r $FPS -B $SCREEN_HZ` = strict
+    # CFR at the requested rate (captures every compositor frame).
+    DRI=/dev/dri/renderD128
+    [ -e "$DRI" ] || DRI=/dev/dri/renderD129
+    gpu_label="NVIDIA"; owner="nvidia"
+    case "$GPU" in
+        intel) gpu_label="Intel" ; owner="intel" ;;
+        amd)   gpu_label="AMD"   ; owner="intel" ;;
+    esac
+    if command -v wf-recorder >/dev/null 2>&1; then
+        case "$owner" in
+            nvidia)
+                # 1) NVIDIA NVENC
+                NVENC="h264_nvenc"; [ "$CODEC" = hevc ] && NVENC="hevc_nvenc"
+                set -- wf-recorder --no-damage -r "$FPS" -B "$SCREEN_HZ" -o "$OUT" \
+                    -c "$NVENC" -p "b:v=$BITV" -f "$out"
+                [ -n "$audio_args" ] && set -- "$@" "$audio_args"
+                "$@" >"$ERR" 2>&1 &
+                rec_pid=$!
+                mode="wf-recorder (NVIDIA $NVENC)" ;;
+            intel)
+                # 1) Intel VAAPI
+                VENC="h264_vaapi"; [ "$CODEC" = hevc ] && VENC="hevc_vaapi"
+                set -- wf-recorder --no-damage -r "$FPS" -B "$SCREEN_HZ" -o "$OUT" \
+                    -c "$VENC" -d "$DRI" -p "b:v=$BITV" -f "$out"
+                [ -n "$audio_args" ] && set -- "$@" "$audio_args"
+                "$@" >"$ERR" 2>&1 &
+                rec_pid=$!
+                mode="wf-recorder ($gpu_label $VENC)" ;;
+        esac
+        VENC="h264_vaapi"; [ "$CODEC" = hevc ] && VENC="hevc_vaapi"
+        NVENC="h264_nvenc"; [ "$CODEC" = hevc ] && NVENC="hevc_nvenc"
+        if ! sleep_check "$rec_pid"; then
+            if [ "$owner" = intel ]; then
+                # 2) NVIDIA NVENC (after VAAPI)
+                set -- wf-recorder --no-damage -r "$FPS" -B "$SCREEN_HZ" -o "$OUT" \
+                    -c "$NVENC" -p "b:v=$BITV" -f "$out"
+            else
+                # 2) VAAPI (after NVIDIA)
+                set -- wf-recorder --no-damage -r "$FPS" -B "$SCREEN_HZ" -o "$OUT" \
+                    -c "$VENC" -d "$DRI" -p "b:v=$BITV" -f "$out"
+            fi
+            [ -n "$audio_args" ] && set -- "$@" "$audio_args"
+            "$@" >"$ERR" 2>&1 &
+            rec_pid=$!
+            if [ "$owner" = intel ]; then
+                mode="wf-recorder (NVIDIA $NVENC)"
+            else
+                mode="wf-recorder (VAAPI $VENC)"
+            fi
+        fi
+        if ! sleep_check "$rec_pid"; then
+            set -- wf-recorder --no-damage -r "$FPS" -B "$SCREEN_HZ" -o "$OUT" \
+                -c libx264 -p "b:v=$BITV" -p preset=veryfast -f "$out"
+            [ -n "$audio_args" ] && set -- "$@" "$audio_args"
+            "$@" >"$ERR" 2>&1 &
+            rec_pid=$!
+            mode="wf-recorder (software x264)"
+        fi
+    fi
+    if ! kill -0 "$rec_pid" 2>/dev/null; then
+        if command -v wl-screenrec >/dev/null 2>&1; then
+            set -- wl-screenrec -o "$OUT" --codec "$CODEC" -m "$FPS" -b "$BITRATE" -f "$out"
+            [ -e "$DRI" ] && set -- "$@" --dri-device "$DRI"
+            [ -n "$audio_args" ] && set -- "$@" $audio_args
+            "$@" >"$ERR" 2>&1 &
+            rec_pid=$!
+            mode="wl-screenrec (hw)"
+            if ! sleep_check "$rec_pid"; then
+                set -- wl-screenrec -o "$OUT" --codec "$CODEC" --no-hw -m "$FPS" -b "$BITRATE" -f "$out"
+                [ -n "$audio_args" ] && set -- "$@" $audio_args
+                "$@" >"$ERR" 2>&1 &
+                rec_pid=$!
+                mode="wl-screenrec (CPU)"
+            fi
+        fi
+    fi
+    if ! kill -0 "$rec_pid" 2>/dev/null; then
+        cleanup_audio
+        notify-send -a "Screen record" -u critical "Screen record" \
+            "no recorder could start — try: sudo pacman -S wf-recorder" 2>/dev/null
+        return 1
+    fi
+
+    if ! kill -0 "$rec_pid" 2>/dev/null; then
+        cleanup_audio
+        errtxt="$(tail -n 3 "$ERR" 2>/dev/null)"
+        notify-send -a "Screen record" -u critical "Recording failed" \
+            "recorder died instantly — error: ${errtxt:-see ~/.cache/screen-rec.err.log}" 2>/dev/null
+        return 1
+    fi
+    echo "$rec_pid" > "$PID"
+    echo "$out" > "$PATHF"
+    echo "$mode" > "$MODEF"
+    notify-send -a "Screen record" -i media-record-100 "Recording started ($mode)" \
+        "$CODEC · ${FPS}fps · $BITRATE · audio: ${audio_note:-none} — press the Screen record tile to stop" 2>/dev/null
+}
+
+[ -f "$PID" ] && stop_rec || start_rec

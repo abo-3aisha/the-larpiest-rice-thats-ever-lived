@@ -15,10 +15,11 @@ menu=$(
         "󰔟  Widgets" \
         "󰌾  Lock Screen Style" \
         "󱠧  My Prays" \
+        "  Recording Options" \
         "󰐥  Power"
 )
 
-sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Control Center 󰀄" --lines 11 --width 360)
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Control Center 󰀄" --lines 12 --width 380)
 [ -z "$sel" ] && exit 0
 
 case "$sel" in
@@ -31,8 +32,9 @@ case "$sel" in
     *"Brightness +"*)       "$HOME/.local/bin/q-toggle" bright-up ;;
     *"Brightness -"*)      "$HOME/.local/bin/q-toggle" bright-down ;;
     *"Widgets"*)           exec "$HOME/.local/bin/widget-manager" ;;
+    *"Recording"*)         exec "$HOME/.local/bin/screen-rec-gui" ;;
     *"Lock Screen"*)       exec "$HOME/.local/bin/lockscreen-style" ;;
-    *"󱠧  My Prays" \
-    *"Power"*)              exec "$HOME/.local/bin/power-menu" ;;
+    *"My Prays"*)          exec "$HOME/.local/bin/my-prays" ;;
+    *"Power"*)             exec "$HOME/.local/bin/power-menu" ;;
 esac
 exit 0

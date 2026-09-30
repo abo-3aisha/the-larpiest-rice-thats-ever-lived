@@ -64,6 +64,17 @@
                     {
                         "label": "󰐥  Power",
                         "command": "/home/abo3aisha/.local/bin/q-toggle power"
+                    },
+                    {
+                        "label": "  Screenshot",
+                        "command": "/home/abo3aisha/.local/bin/swaync-action screenshot"
+                    },
+                    {
+                        "label": "  Screen record",
+                        "type": "toggle",
+                        "active": false,
+                        "command": "/home/abo3aisha/.local/bin/swaync-action record",
+                        "update-command": "test -f /home/abo3aisha/.cache/screen-rec.pid && echo true || echo false"
                     }
                 ]
             }

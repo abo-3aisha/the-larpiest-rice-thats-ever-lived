@@ -10,7 +10,7 @@
 
 window#waybar {
     background: transparent;
-    color: #c4ebf5;
+    color: #d4d6d8;
 }
 
 window#waybar.hidden { opacity: 0.0; }
@@ -23,7 +23,7 @@ window#waybar.empty #window { background: none; }
 .modules-left,
 .modules-center,
 .modules-right {
-    background: rgba(47, 40, 60, 0.40);
+    background: rgba(30, 30, 31, 0.40);
     border: 1px solid rgba(255,255,255,0.10);
     border-radius: 18px;
     margin-top: 8px;
@@ -33,7 +33,7 @@ window#waybar.empty #window { background: none; }
 }
 .modules-left:hover,
 .modules-center:hover,
-.modules-right:hover { background: rgba(47, 40, 60, 0.55); }
+.modules-right:hover { background: rgba(30, 30, 31, 0.55); }
 .modules-left { margin-left: 10px; }
 .modules-right { margin-right: 10px; }
 
@@ -41,7 +41,7 @@ window#waybar.empty #window { background: none; }
 #custom-logo {
     font-size: 20px;
     padding: 0 10px 0 8px;
-    color: #6fdbfe;
+    color: #8bcece;
 }
 
 /* ===== workspaces ===== */
@@ -52,13 +52,13 @@ window#waybar.empty #window { background: none; }
     border-radius: 12px;
 }
 #workspaces button.active {
-    background: #6fdbfe;
+    background: #8bcece;
     color: #111113;
 }
 #workspaces button:hover {
-    background: #2f283c;
-    color: #6fdbfe;
-    border: 1px solid #6fdbfe;
+    background: #1e1e1f;
+    color: #8bcece;
+    border: 1px solid #8bcece;
 }
 
 /* ===== generic modules ===== */
@@ -67,17 +67,17 @@ window#waybar.empty #window { background: none; }
     padding: 0 9px;
     margin: 1px 2px;
     border-radius: 12px;
-    color: #c4ebf5;
+    color: #d4d6d8;
 }
 
 #clock {
     font-weight: bold;
-    color: #c4ebf5;
+    color: #d4d6d8;
 }
-#clock:hover { color: #6fdbfe; }
+#clock:hover { color: #8bcece; }
 
 #custom-language {
-    background: #6fdbfe;
+    background: #8bcece;
     color: #111113;
     border-radius: 12px;
     padding: 0 9px;
@@ -88,7 +88,7 @@ window#waybar.empty #window { background: none; }
     color: #a6a9b0;
 }
 #network:hover, #bluetooth:hover, #pulseaudio:hover, #battery:hover,
-#cpu:hover, #memory:hover, #temperature:hover { color: #6fdbfe; }
+#cpu:hover, #memory:hover, #temperature:hover { color: #8bcece; }
 
 #battery.warning { color: #f08c00; }
 #battery.critical { color: #e5484d; }
@@ -104,7 +104,7 @@ window#waybar.empty #window { background: none; }
     color: #a6a9b0;
 }
 #tray > .active {
-    color: #c4ebf5;
+    color: #d4d6d8;
 }
 #tray > .needs-attention {
     background: #e5484d;
@@ -113,38 +113,38 @@ window#waybar.empty #window { background: none; }
 
 /* ===== tooltip ===== */
 tooltip {
-    background: #1d152b;
-    border: 1px solid #6fdbfe;
+    background: #0a0a0b;
+    border: 1px solid #8bcece;
     border-radius: 12px;
-    color: #c4ebf5;
+    color: #d4d6d8;
 }
 tooltip label {
-    color: #c4ebf5;
+    color: #d4d6d8;
     font-size: 15px;
 }
 
 
 /* ===== persisted custom rules (auto re-appended by palette.py) ===== */
-/* NOTE: theme tokens (#6fdbfe, #a6a9b0, #111113, #2f283c, #e5484d)
+/* NOTE: theme tokens (#8bcece, #a6a9b0, #111113, #1e1e1f, #e5484d)
    are substituted by palette.py before appending, so the whole bar stays
    in sync with the wallpaper accent on every theme change. */
 
 /* circular workspace buttons (survives palette.py template regen) */
 #workspaces button { min-width: 20px; min-height: 20px; padding: 0; margin: 0 1px; color: #a6a9b0; border-radius: 50%; }
-#workspaces button.active { background: #6fdbfe; color: #111113; }
-#workspaces button:hover { background: #2f283c; color: #6fdbfe; border: 1px solid #6fdbfe; }
+#workspaces button.active { background: #8bcece; color: #111113; }
+#workspaces button:hover { background: #1e1e1f; color: #8bcece; border: 1px solid #8bcece; }
 
 /* discord layer (super+K): small icon beside active ws number */
 #custom-comm-layer { margin: 0; padding: 0; min-width: 0; font-size: 12px; color: transparent; }
-#custom-comm-layer.active { font-size: 12px; margin: 0 9px 0 2px; padding: 0; color: #6fdbfe; }
-#custom-comm-layer:hover { color: #6fdbfe; }
+#custom-comm-layer.active { font-size: 12px; margin: 0 9px 0 2px; padding: 0; color: #8bcece; }
+#custom-comm-layer:hover { color: #8bcece; }
 #custom-weather { color: #a6a9b0; }
-#custom-weather:hover { color: #6fdbfe; }
-#custom-wifi { color: #a6a9b0; }
-#custom-wifi:hover { color: #6fdbfe; }
-#custom-wifi.off { color: #5b5f66; }
-#custom-wifi.off:hover { color: #6fdbfe; }
-#custom-wifi.disconnected { color: #a6a9b0; }
+#custom-weather:hover { color: #8bcece; }
+#custom-wifi { color: #8bcece; }
+#custom-wifi:hover { color: #8bcece; }
+#custom-wifi.off { color: #a6a9b0; opacity: 0.75; }
+#custom-wifi.off:hover { color: #8bcece; }
+#custom-wifi.disconnected { color: #8bcece; opacity: 0.8; }
 
 /* net speed (whole-device up/down, centered before the clock) */
 #custom-net-speed {
@@ -153,7 +153,7 @@ tooltip label {
     padding: 0;
     color: #a6a9b0;
 }
-#custom-net-speed:hover { color: #6fdbfe; }
+#custom-net-speed:hover { color: #8bcece; }
 #custom-net-speed.offline { color: transparent; }
 
 #custom-battery {
@@ -163,11 +163,11 @@ tooltip label {
     margin: 1px 8px 1px 0px;
     padding: 0;
     background-repeat: no-repeat;
-    color: #a6a9b0;
+    color: #8bcece;
     font-size: 9px;
 }
-#custom-battery:hover { color: #6fdbfe; }
-#custom-battery.charging { color: #a6a9b0; }
+#custom-battery:hover { color: #8bcece; }
+#custom-battery.charging { color: #8bcece; }
 #custom-battery.critical { color: #e5484d; }
 #custom-battery label { font-size: 9px; padding: 0; }
 #custom-battery.b0 { background-image: url("/home/abo3aisha/.config/waybar/batt/g0.png"); }
@@ -372,4 +372,24 @@ tooltip label {
 #custom-battery.b98.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r98.png"); }
 #custom-battery.b99.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r99.png"); }
 #custom-battery.b100.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r100.png"); }
+
+/* ===== charging bolt (bolt-indicator.sh) — appears ONLY while charging ===== */
+#custom-bolt {
+    padding: 0;
+    margin: 1px 3px 1px 0;
+    font-size: 15px;
+    color: transparent;
+    background: transparent;
+    min-width: 0;
+}
+#custom-bolt.charging { color: #8bcece; }
+#custom-bolt.off { color: transparent; }
+
+/* ===== Material You tint (2026-09-26) ===== */
+#pulseaudio { color: #8bcece; }
+#pulseaudio:hover { color: #8bcece; }
+#custom-power { color: #8bcece; }
+#custom-power:hover { color: #e5484d; }
+#tray { background: rgba(139, 206, 206, 0.08); border-radius: 16px; padding: 0 10px; margin: 1px 2px; }
+#tray:hover { background: rgba(139, 206, 206, 0.15); }
 
