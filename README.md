@@ -5,9 +5,19 @@ desktop (`widget-clockana`) and on the hyprlock lockscreen
 (`lockclockana` + `lockscreen-style`), all colours synced from the wallpaper
 accent by the single theme engine (`palette.py`).
 
+## 📸 Screenshots
+
+| | | |
+|---|---|---|
+| ![Desktop](screenshots/shot-01.webp) | ![Wallpaper picker](screenshots/shot-02.webp) | ![Control center](screenshots/shot-03.webp) |
+| Desktop | Wallpaper picker | Control center |
+| ![Widgets](screenshots/shot-04.webp) | ![Recording options](screenshots/shot-05.webp) | |
+| Glass widgets | Screen-recorder options | |
+
 ```
 .
 ├── README.md
+├── screenshots/                   desktop shots (webp, 844K total)
 ├── .config/hypr/                 Hyprland (lua + rules + hyprlock)
 │   ├── hyprland.lua              main config (keybinds at the bottom)
 │   ├── hyprland-gui.lua          HyprMod-generated overrides (SUPER+E → dolphin)
