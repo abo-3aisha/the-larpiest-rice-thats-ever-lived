@@ -6,11 +6,20 @@ local HOME = (os and os.getenv and os.getenv("HOME")) or "/home/abo3aisha"
 
 local ok_theme = pcall(dofile, HOME .. "/.config/hypr/theme.lua")
 
--- Performance profile written by ~/.local/bin/perf-mode (animations + blur).
--- Missing on a fresh install / before the app is ever opened — hence pcall,
--- exactly like the theme above. Must come BEFORE the hl.config blocks below
--- so the values land in the config that actually takes effect.
+-- Performance profile values, written by ~/.local/bin/perf-mode.
+--
+-- perf.lua sets only two booleans and nothing else -- no hl.config call. It
+-- used to be a full hl.config block, and both placements failed: loaded early
+-- it was overwritten by the decoration/animations blocks below, loaded late it
+-- replaced decoration.blur wholesale and wiped size/passes/vibrancy. A plain
+-- table has no merge rules, so the flags below are interpolated into this
+-- file's own hl.config and there is exactly one place that owns these keys.
 pcall(dofile, HOME .. "/.config/rice/perf.lua")
+if type(RICE_PERF) ~= "table" then
+    RICE_PERF = { anim = true, blur = true }
+end
+local PERF_ANIM = RICE_PERF.anim and true or false
+local PERF_BLUR = RICE_PERF.blur and true or false
 
 -- Interface locale + keyboard layout, written by ~/.local/bin/language-and-time
 -- into ~/.config/rice/i18n.conf.
@@ -35,16 +44,11 @@ do
     end
 end
 
--- Locale code (ar_SY.UTF-8) -> the layout xkb name (ara). Hyprland wants the
--- bare layout in kb_layout but the full locale in env.
-local function rice_locale_to_layout(loc)
-    if not loc or loc == "" then return nil end
-    return (loc:match("^([%a_]+)") or loc):lower()
-end
 
 if rice_i18n.LANG and rice_i18n.LANG ~= "" then
     hl.env("LANG", rice_i18n.LANG)
-    hl.env("LANGUAGE", (rice_i18n.LANG:match("^([%a_]+)"):gsub("_", "-")))
+      local lang_only = rice_i18n.LANG:match("^([%a_]+)")
+      hl.env("LANGUAGE", lang_only and lang_only:gsub("_", "-") or rice_i18n.LANG)
     hl.env("LC_TIME", rice_i18n.LANG)
 end
 
@@ -177,7 +181,10 @@ hl.config({
         },
 
         blur = {
-            enabled   = true,
+            -- PERF_BLUR comes from ~/.config/rice/perf.lua (the Performance
+            -- app). Everything else here stays ours, so a profile only ever
+            -- flips the one switch instead of replacing the whole blur table.
+            enabled   = PERF_BLUR,
             size      = 8,
             passes    = 2,
             vibrancy  = 0.15,
@@ -189,7 +196,8 @@ hl.config({
 
 hl.config({
     animations = {
-        enabled = true,
+        -- PERF_ANIM comes from ~/.config/rice/perf.lua (the Performance app).
+        enabled = PERF_ANIM,
     },
 })
 
