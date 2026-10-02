@@ -8,7 +8,7 @@
 
 A profile is a complete saved set: animations, blur, cava, glass widgets, the
 idle timer and how long before the screen itself blanks. Three profiles ship
-built in (Balanced / Saver / Gaming); Create, Duplicate, Rename and Delete add
+built in (Balanced / Power Saver / Gaming); Create, Duplicate, Rename and Delete add
 more. Editing a profile only changes what Apply will push — nothing happens
 behind your back.
 """
@@ -102,6 +102,7 @@ class App:
         self.row = 0                     # highlighted setting
         self.rows = []
         self.win = None
+        self._syncing_list = False
         self.build()
 
     # ---------------------------------------------------------------- i18n --
@@ -177,6 +178,11 @@ class App:
         sc.set_max_content_height(128)
         sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sc.add(self.listbox)
+        # Clicking a profile has to select it. Without this the list was purely
+        # decorative: paint() highlighted self.sel, nothing ever read a click
+        # back, so Apply always applied whichever profile happened to be index 0
+        # (Balanced) no matter what the user had clicked on.
+        self.listbox.connect("row-selected", self.on_row_selected)
         root.add(sc)
 
         pbtns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -238,6 +244,17 @@ class App:
         grid.attach(val, 1, r, 1, 1)
         self.rows.append((field, kind, name, val))
 
+    def on_row_selected(self, _lb, row):
+        """User clicked a profile. row-selected also fires for the
+        select_row() call inside fill_list(), so ignore that one."""
+        if self._syncing_list or row is None:
+            return
+        idx = self.listbox.get_children().index(row)
+        if idx != self.sel:
+            self.sel = idx
+            self.row = 0
+            self.paint()
+
     def fill_list(self):
         for c in list(self.listbox):
             self.listbox.remove(c)
@@ -256,7 +273,9 @@ class App:
         self.listbox.show_all()
         rows = self.listbox.get_children()
         if rows and self.sel < len(rows):
+            self._syncing_list = True
             self.listbox.select_row(rows[self.sel])
+            self._syncing_list = False
 
     # -------------------------------------------------------------- values --
     def value(self, field, kind):
@@ -374,12 +393,29 @@ class App:
     def on_key(self, _w, ev):
         k = ev.keyval
         nprof = len(self.profiles)
+        # Up/Down walk the PROFILES. That is the thing the user comes here to
+        # switch, and it was the broken one: Up/Down used to move the settings
+        # cursor instead, so picking a profile with the arrow keys and pressing
+        # Enter applied Balanced every single time. Settings rows moved to
+        # Shift+Up / Shift+Down, Left/Right still cycle the focused row's value,
+        # and Tab stays as an alias for profile switching.
+        shift = bool(ev.state & Gdk.ModifierType.SHIFT_MASK)
         if k in (Gdk.KEY_Down,):
-            self.row = (self.row + 1) % len(self.rows)
+            if shift:
+                self.row = (self.row + 1) % len(self.rows)
+            else:
+                self.sel = (self.sel + 1) % nprof
+                self.row = 0
+                self.fill_list()
             self.paint()
             return True
         if k in (Gdk.KEY_Up,):
-            self.row = (self.row - 1) % len(self.rows)
+            if shift:
+                self.row = (self.row - 1) % len(self.rows)
+            else:
+                self.sel = (self.sel - 1) % nprof
+                self.row = 0
+                self.fill_list()
             self.paint()
             return True
         if k == Gdk.KEY_Right:
@@ -390,11 +426,13 @@ class App:
             return True
         if k in (Gdk.KEY_Tab,):
             self.sel = (self.sel + 1) % nprof
+            self.row = 0
             self.fill_list()
             self.paint()
             return True
         if k in (Gdk.KEY_ISO_Left_Tab,):
             self.sel = (self.sel - 1) % nprof
+            self.row = 0
             self.fill_list()
             self.paint()
             return True

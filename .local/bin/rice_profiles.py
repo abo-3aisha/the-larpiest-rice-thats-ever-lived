@@ -20,8 +20,14 @@ FIELDS = ("ANIMATIONS", "BLUR", "CAVA", "WIDGETS",
 
 BUILTIN = [
     # name          anim blur cava wid  timer screen login   mode
+    # Balanced is the "everything on" reference. Gaming and Power Saver are
+    # deliberately close to each other -- same visible state, animations kept on
+    # in both -- and are told apart by intent rather than by looks: Gaming has
+    # no idle timer at all, while Power Saver stays light but still drops to
+    # the full saver after a couple of idle minutes, which is where the saving
+    # actually happens.
     ("Balanced",     1,   1,    1,   1,    15,    0,     0, "balanced"),
-    ("Saver",        0,   0,    0,   0,     2,    2,     0, "saver"),
+    ("Power Saver",  1,   0,    0,   0,     2,    2,     0, "balanced"),
     ("Gaming",       1,   0,    0,   0,     0,    0,     0, "balanced"),
 ]
 

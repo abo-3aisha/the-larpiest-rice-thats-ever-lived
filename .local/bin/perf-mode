@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 eval "$("$HOME/.local/bin/i18n.py" dump)"
 # perf-mode — the single switch behind the Performance app.
-#   perf-mode on     → Saver  : animations + blur off, cava + glass widgets stopped
+#   perf-mode on     → full saver : animations + blur off, cava + widgets stopped.
+#                                   This is the idle drop target, not a profile name;
+#                                   the Power Saver profile looks like Gaming until idle.
 #   perf-mode off    → Balanced: everything back exactly as it was
 #   perf-mode status → print the current mode + what each toggle is doing
 #   perf-mode watch  → idle-timer daemon (logs you into Saver when the
