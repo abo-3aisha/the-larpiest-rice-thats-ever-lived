@@ -8,7 +8,7 @@ for m in wofi rofi fuzzel; do
 done
 
 if [ -z "$menu" ]; then
-    notify-send -u low -t 2600 "Session" "no menu app (wofi/rofi/fuzzel)" 2>/dev/null
+    notify-send -u low -t 2600 "$T_SES_TITLE" "$T_SES_NO_MENU" 2>/dev/null
     exit 1
 fi
 
@@ -29,15 +29,40 @@ else
     X=0
 fi
 
-opts="󰒲  Sleep\n󰜎  Reboot\n󰐥  Shutdown\n"
+eval "$("$HOME/.local/bin/i18n.py" dump)"
+
+opts="󰒲  $T_SES_SLEEP\n󰜎  $T_SES_REBOOT\n󰐥  $T_SES_SHUTDOWN\n"
 case "$menu" in
-    wofi)   sel="$(printf "%b" "$opts" | wofi --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 --lines 3 2>/dev/null)" ;;
-    rofi)   sel="$(printf "%b" "$opts" | rofi -dmenu -p "⏻" -xoffset "$X" -yoffset 12 -lines 3 2>/dev/null)" ;;
+    wofi)   sel="$(printf "%b" "$opts" | wofi --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 --lines 1 --columns 3 2>/dev/null)" ;;
+    rofi)   sel="$(printf "%b" "$opts" | rofi -dmenu -p "⏻" -xoffset "$X" -yoffset 12 -lines 1 -columns 3 2>/dev/null)" ;;
     fuzzel) sel="$(printf "%b" "$opts" | fuzzel --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 2>/dev/null)" ;;
 esac
 
-case "$sel" in
-    *Sleep*)    systemctl suspend ;;
-    *Reboot*)   systemctl reboot ;;
-    *Shutdown*) systemctl poweroff ;;
+# Dispatch by INDEX, not by matching the visible label: a translated menu can
+# never pick the wrong action, and the confirm step is matched by index too.
+opts_plain=$(printf '%b' "$opts" | sed 's/^[^[:alnum:]]*//')
+mapfile -t rows < <(printf '%b' "$opts_plain")
+sel_plain="${sel#*  }"
+idx=-1
+for i in "${!rows[@]}"; do
+    [ "${rows[$i]}" = "$sel_plain" ] && idx=$i && break
+done
+
+confirm() {
+    local q="$1" cmd="$2" y
+    y=$(printf '󰄬  %s\n󰅙  %s\n' "$T_SES_CONFIRM_YES" "$T_SES_CONFIRM_NO" \
+        | wofi --dmenu --prompt "$q" --lines 1 --columns 2 2>/dev/null)
+    [ -z "$y" ] && return 1
+    case "${y#*  }" in
+        "$T_SES_CONFIRM_YES"*) "$cmd" ;;
+        *) return 1 ;;
+    esac
+}
+
+case "$idx" in
+    0) systemctl suspend ;;
+    1) confirm "$T_SES_REBOOT_Q"   "systemctl reboot"   || exit 0 ;;
+    2) confirm "$T_SES_SHUTDOWN_Q" "systemctl poweroff" || exit 0 ;;
+    *) exit 0 ;;
 esac
+exit 0

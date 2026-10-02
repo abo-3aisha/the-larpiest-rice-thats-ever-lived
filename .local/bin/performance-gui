@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""performance-gui — Performance / RAM / power profiles (SUPER+S → Performance).
+
+  Up/Down        move between rows
+  Right/Left     change that row's value
+  Enter          apply the highlighted profile
+  Esc            cancel
+
+A profile is a complete saved set: animations, blur, cava, glass widgets, the
+idle timer and how long before the screen itself blanks. Three profiles ship
+built in (Balanced / Saver / Gaming); Create, Duplicate, Rename and Delete add
+more. Editing a profile only changes what Apply will push — nothing happens
+behind your back.
+"""
+import os
+import subprocess
+import sys
+import warnings
+
+warnings.filterwarnings("ignore", module="gi")
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+HOME = os.path.expanduser("~")
+BIN = os.path.join(HOME, ".local/bin")
+THEME = os.path.join(HOME, ".config/hypr/theme.lua")
+
+sys.path.insert(0, BIN)
+import i18n        # noqa: E402
+import rice_profiles as rp  # noqa: E402
+
+PERF = os.path.join(BIN, "perf-mode")
+
+TIMERS = ["0", "1", "2", "3", "5", "10", "15", "30", "60"]
+SCREENS = ["0", "1", "2", "3", "5", "10", "15", "30", "60"]
+
+# row -> (i18n key, field, kind)
+ROWS = [
+    ("PF_ANIMATIONS", "ANIMATIONS", "onoff"),
+    ("PF_BLUR", "BLUR", "onoff"),
+    ("PF_CAVA", "CAVA", "onoff"),
+    ("PF_WIDGETS", "WIDGETS", "onoff"),
+    ("PF_TIMER", "TIMER", "list"),
+    ("PF_SCREEN", "IDLE_SCREEN", "list"),
+    ("PF_LOGIN_ONLY", "LOGIN_ONLY", "onoff"),
+]
+
+
+def run(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True).returncode
+
+
+def notify(text):
+    subprocess.run(["notify-send", "-a", "Rice", "-t", "2600", text],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def theme_accent():
+    try:
+        import re
+        m = re.search(r'accent\s*=\s*"([0-9a-fA-F]{6})"',
+                      open(THEME, encoding="utf-8").read())
+        return "#" + m.group(1)
+    except Exception:
+        return "#d8a028"
+
+
+def live_stats():
+    used = 0
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemTotal"):
+                    total = int(line.split()[1])
+                elif line.startswith("MemAvailable"):
+                    used = total - int(line.split()[1])
+    except OSError:
+        pass
+    held = 0
+    for pat in ("cava-dock", "widget-clockana", "widget-clock", "widget-music",
+                "widget-sys", "widget-miku", "widget-prayer", "widget-hijri"):
+        for p in subprocess.run(["pgrep", "-f", pat], shell=True,
+                                capture_output=True, text=True).stdout.split():
+            try:
+                with open("/proc/%s/status" % p, encoding="utf-8") as fh:
+                    for line in fh:
+                        if line.startswith("VmRSS"):
+                            held += int(line.split()[1])
+                            break
+            except OSError:
+                pass
+    return used // 1024, held // 1024
+
+
+class App:
+    def __init__(self):
+        self.profiles = rp.load()
+        self.names = [p["name"] for p in self.profiles]
+        self.sel = 0                     # highlighted profile
+        self.row = 0                     # highlighted setting
+        self.rows = []
+        self.win = None
+        self.build()
+
+    # ---------------------------------------------------------------- i18n --
+    def T(self, key):
+        return i18n.t(key)
+
+    @property
+    def p(self):
+        return self.profiles[self.sel]
+
+    # ------------------------------------------------------------- drawing --
+    def build(self):
+        acc = theme_accent()
+        css = Gtk.CssProvider()
+        css.load_from_data(("""
+        window { background: #161617; }
+        label.title { font-size: 17px; color: %s; font-weight: bold; }
+        label.head { font-size: 12px; color: #6f727a; padding-top: 10px; }
+        label.name { color: #8a8d95; font-size: 13px; padding: 3px 6px; }
+        label.val { color: #ebde98; font-size: 14px; font-weight: bold;
+                    padding: 3px 10px; }
+        label.sel { background: %s; color: #101012; border-radius: 6px; }
+        label.hint { font-size: 11px; color: #6f727a; }
+        label.item { color: #d7d7dc; font-size: 13px; padding: 4px 10px; }
+        label.itemsel { background: %s; color: #101012; border-radius: 6px;
+                        font-weight: bold; }
+        label.itembuilt { color: #7f828a; font-size: 11px; }
+        label.stat { font-size: 11px; color: #6f727a; }
+        button { color: #ebde98; background: #232326; border: 1px solid #33333a;
+                 padding: 5px 12px; }
+        button:hover { border-color: %s; }
+        listbox { background: #1d1d20; border: 1px solid #2c2c32;
+                  border-radius: 8px; }
+        listbox row { padding: 2px; }
+        entry { background: #232326; color: #ebde98;
+                border: 1px solid #33333a; }
+        """).replace("%s", acc).encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        self.win = Gtk.Window()
+        self.win.set_title(self.T("PF_TITLE"))
+        self.win.set_default_size(560, 470)
+        self.win.set_resizable(False)
+        self.win.set_position(Gtk.WindowPosition.CENTER)
+        self.win.connect("key-press-event", self.on_key)
+        self.win.connect("destroy", lambda *_: Gtk.main_quit())
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
+        root.set_margin_top(18)
+        root.set_margin_bottom(14)
+        if i18n.t("RTL") == "1":
+            root.set_direction(Gtk.TextDirection.RTL)
+        self.win.add(root)
+
+        title = Gtk.Label(label=self.T("PF_TITLE"), xalign=0.0)
+        title.get_style_context().add_class("title")
+        root.add(title)
+
+        # ---- profiles -------------------------------------------------
+        h1 = Gtk.Label(label=self.T("PF_PROFILES"), xalign=0.0)
+        h1.get_style_context().add_class("head")
+        root.add(h1)
+
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.set_can_focus(False)
+        self.fill_list()
+        sc = Gtk.ScrolledWindow()
+        sc.set_min_content_height(112)
+        sc.set_max_content_height(128)
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sc.add(self.listbox)
+        root.add(sc)
+
+        pbtns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for txt, fn, tip in (
+                (self.T("PF_CREATE"), self.on_create, self.T("PF_CREATE_TIP")),
+                (self.T("PF_DUPLICATE"), self.on_duplicate, ""),
+                (self.T("PF_RENAME"), self.on_rename, ""),
+                (self.T("PF_DELETE"), self.on_delete, self.T("PF_DELETE_TIP"))):
+            b = Gtk.Button(label=txt)
+            b.set_tooltip_text(tip)
+            b.connect("clicked", fn)
+            pbtns.pack_start(b, True, True, 0)
+        root.add(pbtns)
+
+        # ---- the selected profile's knobs ----------------------------
+        h2 = Gtk.Label(label=self.T("PF_SETTINGS"), xalign=0.0)
+        h2.get_style_context().add_class("head")
+        root.add(h2)
+
+        grid = Gtk.Grid(column_spacing=14, row_spacing=5)
+        root.add(grid)
+        self.rows = []
+        for i, (key, field, kind) in enumerate(ROWS):
+            self.add_row(grid, i, key, field, kind)
+
+        root.pack_start(Gtk.Separator(), True, True, 0)
+
+        self.stat = Gtk.Label(label="", xalign=0.0)
+        self.stat.get_style_context().add_class("stat")
+        root.add(self.stat)
+
+        hint = Gtk.Label(label=self.T("PF_HINT"), xalign=0.0)
+        hint.get_style_context().add_class("hint")
+        root.add(hint)
+
+        btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btns.set_halign(Gtk.Align.END)
+        ap = Gtk.Button(label=self.T("LT_APPLY"))
+        ap.get_style_context().add_class("suggested-action")
+        ap.connect("clicked", lambda *_: self.apply())
+        cc = Gtk.Button(label=self.T("LT_CANCEL"))
+        cc.connect("clicked", lambda *_: self.win.destroy())
+        btns.pack_end(ap, False, False, 0)
+        btns.pack_end(cc, False, False, 0)
+        root.add(btns)
+
+        GLib.timeout_add_seconds(2, self.tick)
+        self.paint()
+        self.win.show_all()
+        self.win.present()
+
+    def add_row(self, grid, r, key, field, kind):
+        name = Gtk.Label(label=self.T(key), xalign=0.0)
+        name.get_style_context().add_class("name")
+        name.set_size_request(185, -1)
+        val = Gtk.Label(label="", xalign=0.0)
+        val.get_style_context().add_class("val")
+        grid.attach(name, 0, r, 1, 1)
+        grid.attach(val, 1, r, 1, 1)
+        self.rows.append((field, kind, name, val))
+
+    def fill_list(self):
+        for c in list(self.listbox):
+            self.listbox.remove(c)
+        for i, p in enumerate(self.profiles):
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            l = Gtk.Label(label=p["name"], xalign=0.0)
+            l.get_style_context().add_class("item")
+            box.pack_start(l, True, True, 0)
+            if p.get("builtin"):
+                t = Gtk.Label(label=self.T("PF_BUILTIN"), xalign=1.0)
+                t.get_style_context().add_class("itembuilt")
+                box.pack_end(t, False, False, 0)
+            r = Gtk.ListBoxRow()
+            r.add(box)
+            self.listbox.add(r)
+        self.listbox.show_all()
+        rows = self.listbox.get_children()
+        if rows and self.sel < len(rows):
+            self.listbox.select_row(rows[self.sel])
+
+    # -------------------------------------------------------------- values --
+    def value(self, field, kind):
+        v = str(self.p.get(field, 0))
+        if kind == "onoff":
+            return self.T("PF_ON") if v == "1" else self.T("PF_OFF")
+        return self.T("PF_MIN") % v if v != "0" else self.T("PF_NEVER")
+
+    def options(self, field, kind):
+        if kind == "onoff":
+            return ["1", "0"]
+        return TIMERS if field == "TIMER" else SCREENS
+
+    def cycle(self, delta):
+        field, kind, _n, _v = self.rows[self.row]
+        opts = self.options(field, kind)
+        try:
+            i = opts.index(str(self.p.get(field, 0)))
+        except ValueError:
+            i = 0
+        self.p[field] = opts[(i + delta) % len(opts)]
+        self.paint()
+
+    def paint(self):
+        for i, (_f, _k, name, val) in enumerate(self.rows):
+            val.set_text(self.value(_f, _k))
+            for lbl in (name, val):
+                lbl.get_style_context().remove_class("sel")
+            if i == self.row:
+                for lbl in (name, val):
+                    lbl.get_style_context().add_class("sel")
+        # highlight the profile row too
+        for c in self.listbox.get_children():
+            c.get_child().get_style_context().remove_class("itemsel")
+        kids = self.listbox.get_children()
+        if kids and self.sel < len(kids):
+            kids[self.sel].get_child().get_style_context().add_class("itemsel")
+        self.tick()
+
+    def tick(self):
+        used, held = live_stats()
+        self.stat.set_text("%s %d MB   ·   %s %d MB" %
+                           (self.T("PF_RAM"), used,
+                            self.T("PF_CAVA") + "/" + self.T("PF_WIDGETS"), held))
+        return True
+
+    def rebuild(self):
+        """Cheapest way to redraw the whole window after the list changed."""
+        self.win.destroy()
+        self.win = None
+        self.build()
+
+    # ------------------------------------------------------------- profile --
+    def on_create(self, *a):
+        name = self.ask(self.T("PF_NEW_NAME"))
+        if not name:
+            return
+        name = rp.unique_name(self.profiles, name)
+        base = dict(self.p)
+        base["name"] = name
+        base["builtin"] = False
+        self.profiles.append(base)
+        self.sel = len(self.profiles) - 1
+        rp.save(self.profiles)
+        self.rebuild()
+
+    def on_duplicate(self, *a):
+        name = rp.unique_name(self.profiles, "%s %s" % (self.p["name"],
+                                                       self.T("PF_COPY")))
+        base = dict(self.p)
+        base["name"] = name
+        base["builtin"] = False
+        self.profiles.append(base)
+        self.sel = len(self.profiles) - 1
+        rp.save(self.profiles)
+        self.rebuild()
+
+    def on_rename(self, *a):
+        if self.p.get("builtin"):
+            notify(self.T("PF_BUILTIN_NO_RENAME"))
+            return
+        name = self.ask(self.T("PF_NEW_NAME"), self.p["name"])
+        if not name or name == self.p["name"]:
+            return
+        self.p["name"] = rp.unique_name(
+            [x for x in self.profiles if x is not self.p], name)
+        rp.save(self.profiles)
+        self.rebuild()
+
+    def on_delete(self, *a):
+        if self.p.get("builtin"):
+            notify(self.T("PF_BUILTIN_NO_DELETE"))
+            return
+        self.profiles.pop(self.sel)
+        self.sel = min(self.sel, len(self.profiles) - 1)
+        rp.save(self.profiles)
+        self.rebuild()
+
+    def ask(self, title, initial=""):
+        d = Gtk.Dialog(title=title, parent=self.win, modal=True)
+        d.add_buttons(self.T("LT_CANCEL"), Gtk.ResponseType.CANCEL,
+                      self.T("PF_OK"), Gtk.ResponseType.OK)
+        e = Gtk.Entry()
+        e.set_text(initial)
+        e.set_activates_default(True)
+        d.get_content_area().add(e)
+        d.set_default_response(Gtk.ResponseType.OK)
+        d.show_all()
+        r = d.run()
+        txt = e.get_text().strip()
+        d.destroy()
+        return txt if r == Gtk.ResponseType.OK else ""
+
+    # ---------------------------------------------------------------- keys --
+    def on_key(self, _w, ev):
+        k = ev.keyval
+        nprof = len(self.profiles)
+        if k in (Gdk.KEY_Down,):
+            self.row = (self.row + 1) % len(self.rows)
+            self.paint()
+            return True
+        if k in (Gdk.KEY_Up,):
+            self.row = (self.row - 1) % len(self.rows)
+            self.paint()
+            return True
+        if k == Gdk.KEY_Right:
+            self.cycle(1)
+            return True
+        if k == Gdk.KEY_Left:
+            self.cycle(-1)
+            return True
+        if k in (Gdk.KEY_Tab,):
+            self.sel = (self.sel + 1) % nprof
+            self.fill_list()
+            self.paint()
+            return True
+        if k in (Gdk.KEY_ISO_Left_Tab,):
+            self.sel = (self.sel - 1) % nprof
+            self.fill_list()
+            self.paint()
+            return True
+        if k in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space):
+            self.apply()
+            return True
+        if k == Gdk.KEY_Escape:
+            self.win.destroy()
+            return True
+        return False
+
+    # --------------------------------------------------------------- apply --
+    def apply(self):
+        rp.save(self.profiles, self.p["name"])
+        rp.write_perf_conf(self.p)
+        run("%s off" % PERF)          # pushes animations/blur/cava/widgets
+        run("pkill -f 'perf-mode watch' >/dev/null 2>&1")
+        if str(self.p.get("TIMER", 0)) != "0":
+            run("(setsid %s watch >/dev/null 2>&1 &)" % PERF)
+        self.win.destroy()
+        Gtk.main_quit()
+        notify("%s · %s" % (self.T("PF_APPLIED"), self.p["name"]))
+
+
+if __name__ == "__main__":
+    App()
+    Gtk.main()

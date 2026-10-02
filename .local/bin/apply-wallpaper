@@ -1,49 +1,223 @@
 #!/usr/bin/env bash
-# apply-wallpaper — cover-crop (no stretch) via awww (the /usr/bin successor to
-# swww; CachyOS/Extra package "awww", binaries awww + awww-daemon). Grows the
-# new wallpaper out from the bottom-right corner toward the top-left with a
-# smooth 2s fade at 144fps. Falls back to swww (older) or swaybg if neither
-# daemon exists. Ends with ONE theme call (palette.py --apply) re-skinning
-# waybar/swaync/wofi/hypr/foot/fish/fastfetch/cava/GTK. No competing scripts.
-conf="$HOME/.config/hypr/hyprpaper.conf"
-path=$(sed -n 's/^wallpaper *= *[^,]*,//p' "$conf" | head -1)
-[ -z "$path" ] && exit 0
-[ -f "$path" ] || exit 0
+# apply-wallpaper — the ONE wallpaper pipeline for this machine.
+#
+# Images and videos go through the exact same awww `grow` animation. A video is
+# handled by handing awww a still frame of that video, animating it in exactly
+# like any other image, and only then letting mpvpaper take the output over from
+# the very same frame. The handover is invisible, so both media look and move
+# identically instead of videos snapping in while images glide.
+#
+# Usage:
+#   apply-wallpaper            read the target from ~/.config/hypr/hyprpaper.conf
+#                              (how setwall.sh and the Hyprland autostart use it)
+#   apply-wallpaper <path>     apply this file directly
+set -u
 
-# Video files are owned by mpvpaper; images/animated GIFs stay on awww.
-case "${path,,}" in
-    *.mp4|*.mkv|*.webm|*.mov|*.avi|*.m4v)
-        exec "$HOME/.local/bin/video-wallpaper" "$path"
-        ;;
-esac
+# --------------------------------------------------------------------------
+# The animation. Defined once and used for images AND videos, so the two can
+# never drift apart again.
+# --------------------------------------------------------------------------
+TRANS_TYPE=grow
+TRANS_POS=bottom-right
+TRANS_DUR=1.2
+TRANS_FPS=144
+TRANS_BEZIER="0.0,0.0,0.9,1.0"
+
+
+CONF="$HOME/.config/hypr/hyprpaper.conf"
+VCACHE="$HOME/.cache/video-wallpaper"
+LOG="$HOME/.cache/wallpaper-apply.log"
+
+log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" >> "$LOG" 2>/dev/null; }
+say() { notify-send -t 3000 "Wallpaper" "$1" 2>/dev/null; }
+
+# Serialise overlapping switches; a stale lock never blocks a wallpaper forever.
+LOCK="$HOME/.cache/.wallpaper.lock"
+mkdir "$LOCK" 2>/dev/null || {
+    for _ in $(seq 30); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+    rmdir "$LOCK" 2>/dev/null || true
+}
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+# --------------------------------------------------------------------------
+# Pick the target: an explicit argument wins, otherwise read it back out of
+# hyprpaper.conf, which is what the autostart and setwall.sh rely on.
+# --------------------------------------------------------------------------
+path="${1:-}"
+if [ -z "$path" ]; then
+    path=$(sed -n 's/^wallpaper *= *[^,]*,//p' "$CONF" 2>/dev/null | head -1)
+fi
+[ -n "$path" ] && [ -f "$path" ] || { log "no usable target"; exit 0; }
+path=$(readlink -f -- "$path" 2>/dev/null || printf '%s' "$path")
 
 mon=$(hyprctl monitors 2>/dev/null | awk 'NR==1 && $1=="Monitor" {print $2}')
 mon="${mon:-eDP-1}"
 
-# Kill EVERY wallpaper daemon so no leftover renders stretch (incl. mpvpaper).
-killall hyprpaper swaybg wbg mpvpaper 2>/dev/null
-sleep 0.2
+# A video is anything awww cannot show on its own; everything else (jpg, png,
+# webp, gif) is handled by awww directly.
+is_video=0
+case "${path,,}" in
+    *.mp4|*.mkv|*.webm|*.mov|*.avi|*.m4v) is_video=1 ;;
+esac
 
-if command -v awww >/dev/null 2>&1; then
-    mkdir -p "$HOME/.cache/awww"
-    awww query >/dev/null 2>&1 || (awww-daemon >/dev/null 2>&1 &)
-    sleep 0.4
-    awww img "$path" --resize crop -o "$mon" \
-        --transition-type grow --transition-pos bottom-right \
-        --transition-duration 1.2 --transition-fps 144 \
-        --transition-bezier "0.0,0.0,0.9,1.0"
-elif command -v swww >/dev/null 2>&1; then
-    swww-daemon >/dev/null 2>&1 &
-    sleep 0.4
-    swww img "$path" --resize fill --outputs "$mon" \
-        --transition-type outer --transition-pos 1.0 1.0 \
-        --transition-duration 2 --transition-fps 144 \
-        --transition-bezier 0.0,0.0,0.9,1.0
-elif command -v swaybg >/dev/null 2>&1; then
-    swaybg --mode fill --output "$mon" --image "$path" &
-else
-    notify-send "Wallpaper" "no awww/swww/swaybg found" 2>/dev/null
+# --------------------------------------------------------------------------
+# Stop every background renderer EXCEPT mpvpaper. A playing video is treated as
+# a layer sitting over the image awww owns, not as a replacement for it, so it
+# is left running while the new wallpaper animates underneath it.
+# --------------------------------------------------------------------------
+killall hyprpaper swaybg wbg 2>/dev/null
+had_video=0
+handoff_base="$VCACHE/handoff.png"
+if pgrep -x mpvpaper >/dev/null 2>&1; then
+    had_video=1
+    # Whatever awww last painted for that video is what lifting mpvpaper will
+    # reveal, so it doubles as the starting image for the next grow.
+    prev=$(awww query 2>/dev/null | sed -n 's/.*"path":"\([^"]*\)".*//p' | head -1)
+    [ -f "${prev:-/nonexistent}" ] && handoff_base="$prev"
+    log "video was playing; base frame = $(basename "$handoff_base")"
 fi
 
-# Single re-theme call: wal (if stale) + every generator + restarts waybar.
-python3 "$HOME/.config/hypr/themes/palette.py" --apply 2>/dev/null
+# --------------------------------------------------------------------------
+# Videos get a wallpaper-friendly copy: 1920x1080 H.264 @60fps. The Intel iGPU
+# on this laptop cannot hardware-decode AV1, so a 4K AV1 source decoded in
+# software stalls the whole UI. Cached, and only rebuilt when the source is
+# newer, so switching back to a video is instant.
+# --------------------------------------------------------------------------
+convert_for_wallpaper() {
+    local src="$1" name conv
+    name="$(basename "$src")"
+    case "$name" in
+        *-1080p60.mp4) printf '%s' "$src"; return 0 ;;
+    esac
+    conv="$VCACHE/conv/${name%.*}-1080p60.mp4"
+    mkdir -p "$VCACHE/conv"
+    if [ ! -f "$conv" ] || [ "$src" -nt "$conv" ]; then
+        log "converting $(basename "$src")"
+        say "Converting $(basename "$src") to 1080p60..."
+        ffmpeg -y -v error -stats -i "$src" \
+            -vf "scale=1920:1080:flags=lanczos,fps=60" \
+            -c:v libx264 -preset medium -crf 20 -profile:v high -level 4.2 \
+            -pix_fmt yuv420p -an -movflags +faststart "$conv" || return 1
+    fi
+    [ -f "$conv" ] || return 1
+    printf '%s' "$conv"
+}
+
+# start_mpvpaper <file> — clears the stale IPC socket first (an earlier killall
+# leaves it behind and the next mpvpaper cannot bind it, which is what produced
+# a desktop stuck on the handover still with no video), then verifies the
+# process actually survived instead of assuming success.
+start_mpvpaper() {
+    local rt="${XDG_RUNTIME_DIR:-/tmp}"
+    rm -f "$rt/mpvpaper.socket" "$rt/mpvpaper0.socket" 2>/dev/null
+    mpvpaper -f -p -a FULL -o "no-audio --loop-playlist --hwdec=auto-safe" \
+        "$mon" "$1" >> "$LOG" 2>&1
+    sleep 0.5
+    pgrep -x mpvpaper >/dev/null 2>&1
+}
+
+# ==========================================================================
+# THE ANIMATION — one code path, images and videos alike.
+# ==========================================================================
+if [ "$is_video" -eq 1 ]; then
+    command -v mpvpaper >/dev/null 2>&1 || {
+        say "mpvpaper not installed (yay -S mpvpaper)"; log "no mpvpaper"; exit 1;
+    }
+    conv=$(convert_for_wallpaper "$path") || { say "conversion failed"; log "convert failed"; exit 1; }
+
+    # Frame 0 is what mpvpaper will show first, so animating this exact frame in
+    # makes the handover seamless instead of a cut.
+    still="$VCACHE/handoff.png"
+    mkdir -p "$VCACHE"
+    ffmpeg -y -v error -i "$conv" -frames:v 1 -vf "scale=1920:-2" \
+        "$still" >> "$LOG" 2>&1
+
+    # Sample the theme a little way in: frame 0 is often black or mid-fade and
+    # would hand wal the wrong accent.
+    theme_frame="$VCACHE/frame.png"
+    ffmpeg -y -v error -ss 1 -i "$conv" -frames:v 1 -vf "scale=1920:-2" \
+        "$theme_frame" >> "$LOG" 2>&1
+    [ -f "$theme_frame" ] || cp "$still" "$theme_frame" 2>/dev/null
+else
+    still="$path"
+    theme_frame="$path"
+fi
+
+# awww animates this for BOTH media -- one call, one set of transition values.
+#
+# The order here is what makes the animation actually visible. mpvpaper draws a
+# window over the whole screen, so anything awww does while it is running is
+# invisible: a grow started first and finished 0.9s later played out entirely
+# behind the video, which looked like no animation at all on both video->video
+# and video->image. And leaving the old mpvpaper alive for video->video meant
+# two instances fought over one output, so the new one never took the screen.
+#
+# So the video layer is always lifted BEFORE the animation starts, with awww
+# holding the exact frame the video was showing. Killing mpvpaper then reveals
+# that still with no flash, and the grow plays where it can be seen.
+if command -v awww >/dev/null 2>&1 && [ -f "$still" ]; then
+    mkdir -p "$HOME/.cache/awww"
+    awww query >/dev/null 2>&1 || (awww-daemon >/dev/null 2>&1 &)
+
+    if [ "$had_video" -eq 1 ]; then
+        # awww is behind the video and may still be on an older image, so put
+        # the frame the video was showing back in place (instantly, no
+        # animation) before the video is lifted. That makes the handover
+        # invisible and gives the grow below a correct starting image.
+        log "restoring base frame under the video"
+        awww img "$handoff_base" --resize crop -o "$mon" >> "$LOG" 2>&1
+        sleep 0.1
+        killall mpvpaper 2>/dev/null
+    else
+        killall mpvpaper 2>/dev/null
+    fi
+
+    awww img "$still" --resize crop -o "$mon" \
+        --transition-type "$TRANS_TYPE" --transition-pos "$TRANS_POS" \
+        --transition-duration "$TRANS_DUR" --transition-fps "$TRANS_FPS" \
+        --transition-bezier "$TRANS_BEZIER" >> "$LOG" 2>&1
+
+    if [ "$is_video" -eq 1 ]; then
+        # Let the grow finish, then hand the output to mpvpaper, which picks up
+        # from the very frame that was just animated in.
+        sleep "$TRANS_DUR"
+        start_mpvpaper "$conv" || {
+            rm -f "${XDG_RUNTIME_DIR:-/tmp}"/mpvpaper*.socket 2>/dev/null
+            sleep 0.5
+            start_mpvpaper "$conv" || say "mpvpaper failed to start"
+        }
+    fi
+elif [ "$is_video" -eq 0 ]; then
+    # No awww: these cannot animate, so the video layer is simply dropped.
+    killall mpvpaper 2>/dev/null
+    if command -v swww >/dev/null 2>&1; then
+        swww-daemon >/dev/null 2>&1 &
+        swww img "$still" --resize fill --outputs "$mon" \
+            --transition-type outer --transition-pos 1.0 1.0 \
+            --transition-duration 2 --transition-fps "$TRANS_FPS" \
+            --transition-bezier 0.0,0.0,0.9,1.0 >> "$LOG" 2>&1
+    elif command -v swaybg >/dev/null 2>&1; then
+        swaybg --mode fill --output "$mon" --image "$still" &
+    else
+        say "no awww/swww/swaybg found"
+    fi
+fi
+
+# --------------------------------------------------------------------------
+# Persist the choice. For a video this records the CONVERTED file, whose
+# -1080p60.mp4 name makes the next boot reuse it instead of re-encoding.
+# --------------------------------------------------------------------------
+if [ "$is_video" -eq 1 ]; then
+    saved="$conv"
+else
+    saved="$path"
+fi
+printf 'preload = %s\nwallpaper = %s,%s\n' "$saved" "$mon" "$saved" > "$CONF"
+
+# One re-theme call for everything, sampled from the right frame per media.
+python3 "$HOME/.config/hypr/themes/palette.py" --apply --wall "$theme_frame" \
+    >/dev/null 2>&1
+
+log "applied $(basename "$saved") on $mon (video=$is_video)"
+[ "$is_video" -eq 1 ] && say "Video: $(basename "$path")"
+exit 0

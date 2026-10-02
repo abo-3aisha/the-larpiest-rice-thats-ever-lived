@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+# Widget Music — now playing (playerctl) with a SEEKABLE progress slider.
+# Drag to scrub: the bar tracks the mouse visually, and a SINGLE seek is fired
+# on release (playerctl position). Shows "current / total" time.
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+from widget_lib import mkwin, one_instance
+
+pidf = one_instance("music")
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+
+import widget_lib
+a = widget_lib.accent()
+
+# Fixed widget size (matches widget-manager geometry). GTK normally sizes the
+# window to the text's natural width, so a long track title would stretch the
+# glass. Pin the labels to the inner width -> long titles ellipsize ("...").
+_e = widget_lib.entry("music")
+_sw, _sh = widget_lib.monitor_size()
+_mw = max(80, int(_sw * _e.get("w", 0.2)))
+_INNER = max(1, _mw - 24)
+
+win, box = mkwin("music", """
+#mwhat { font-size: 13px; font-weight: bold; }
+#mtim { font-size: 10px; color: rgba(241,241,243,0.62); }
+#mseek { min-height: 10px; padding: 0; border-radius: 6px; }
+#mseek trough { background: rgba(255,255,255,0.10); border-radius: 6px; min-height: 10px; }
+""")
+
+p = Gtk.CssProvider()
+p.load_from_data(("""
+#mseek slider { background: #%s; border-radius: 8px; min-width: 14px; min-height: 14px; }
+#mseek progress { background: #%s; border-radius: 6px; min-height: 10px; }
+""" % (a, a)).encode())
+try:
+    Gtk.StyleContext.add_provider_for_screen(win.get_screen(), p, 810)
+except Exception:
+    pass
+
+
+def pc(args, player=None):
+    cmd = ["playerctl"]
+    if player:
+        cmd += ["-p", player]
+    r = subprocess.run(cmd + args, capture_output=True, text=True)
+    return r.stdout.strip(), r.returncode
+
+
+art = Gtk.Label()
+art.set_name("mwhat")
+art.set_halign(Gtk.Align.START)
+art.set_ellipsize(3)
+art.set_size_request(_INNER, -1)
+box.pack_start(art, False, False, 0)
+
+tim = Gtk.Label(label="0:00 / 0:00")
+tim.set_name("mtim")
+tim.set_halign(Gtk.Align.START)
+tim.set_size_request(_INNER, -1)
+box.pack_start(tim, False, False, 0)
+
+seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 100.0, 0.25)
+seek.set_name("mseek")
+seek.set_draw_value(False)
+seek.set_valign(Gtk.Align.CENTER)
+seek.set_hexpand(True)
+box.pack_start(seek, True, True, 0)
+
+_PLAYER = [None]
+_DRAG = [None]        # value while dragging (final seek happens on release)
+_NO_SEEK = [False]    # last seek was rejected by the player
+
+
+def on_change(scale, scroll, value):
+    _DRAG[0] = value
+    return True
+
+
+def on_release(*_):
+    target = _DRAG[0]
+    _DRAG[0] = None
+    if target is None:
+        return False
+    out, rc = pc(["position", "%0.3f" % target], _PLAYER[0])
+    _NO_SEEK[0] = rc != 0
+    if not _NO_SEEK[0]:
+        seek.set_value(target)
+    return False
+
+
+def fmt(s):
+    s = max(0, int(s))
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def tick():
+    st, _ = pc(["status"], _PLAYER[0])
+    if st not in ("Playing", "Paused"):
+        art.set_text("Nothing playing")
+        tim.set_text("0:00 / 0:00")
+        seek.set_range(0.0, 100.0)
+        if _DRAG[0] is None:
+            seek.set_value(0.0)
+        _PLAYER[0] = None
+        return True
+
+    # resolve the SAME player every time so display and seek agree
+    if _PLAYER[0] is None:
+        name, rc = pc(["metadata", "--format", "{{ playerName }}"])
+        if rc == 0 and name:
+            _PLAYER[0] = name
+    pl = _PLAYER[0]
+
+    title, _ = pc(["metadata", "title"], pl)
+    artist, _ = pc(["metadata", "artist"], pl)
+    art.set_text("%s — %s" % (artist or "?", title or "?"))
+
+    ln, _ = pc(["metadata", "mpris:length"], pl)
+    dur = 0.0
+    if ln:
+        try:
+            dur = max(0.0, float(ln) / 1e6)
+        except ValueError:
+            dur = 0.0
+
+    pos = 0.0
+    ppos, _ = pc(["position"], pl)
+    if ppos:
+        try:
+            pos = max(0.0, float(ppos))
+        except ValueError:
+            pos = 0.0
+
+    if dur > 0 and _DRAG[0] is None:
+        seek.set_range(0.0, dur)
+        seek.set_value(min(dur, pos))
+    if dur > 0:
+        tim.set_text("%s / %s" % (fmt(pos), fmt(dur)))
+    else:
+        tim.set_text("%s / --:--" % fmt(pos))
+    if _NO_SEEK[0]:
+        tim.set_text(tim.get_text() + "  (no seek)")
+    return True
+
+
+def on_destroy(*a):
+    try:
+        os.unlink(pidf)
+    except OSError:
+        pass
+    Gtk.main_quit()
+
+
+seek.connect("change-value", on_change)
+seek.connect("button-release-event", on_release)
+tick()
+GLib.timeout_add(2000, tick)
+win.connect("destroy", on_destroy)
+win.show_all()
+Gtk.main()

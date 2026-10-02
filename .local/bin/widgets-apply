@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+# widgets-apply — apply ~/.config/widgets/widgets.json to the live session:
+# sets Hyprland window rules (float / size / move / workspace) per widget,
+# then starts or stops each widget process accordingly.
+# Rules are tracked in ~/.cache/widgets-rules.json so a later apply un-sets the
+# EXACT strings from the previous apply (partial "unset,title" is insufficient
+# and leaves duplicate move rules behind).
+import json
+import os
+import subprocess
+import sys
+
+CFG = os.path.expanduser("~/.config/widgets/widgets.json")
+BIN = os.path.expanduser("~/.local/bin")
+RULES = os.path.expanduser("~/.cache/widgets-rules.json")
+GEOM = os.path.expanduser("~/.cache/widgets-geom.json")
+
+TITLES = {
+    "clock": "^Widget Clock$",
+    "clockana": "^Widget Clockana$",
+    "music": "^Widget Music$",
+    "sys": "^Widget Sys$",
+    "miku": "^Widget Miku$",
+    "prayer": "^Widget Prayer$",
+    "hijri": "^Widget Hijri$",
+    "pet": "^miku-pet$",
+}
+
+NOFOCUS = {"clock": True, "clockana": True, "music": True, "sys": True,
+           "miku": True, "prayer": True, "hijri": True, "pet": False}
+WITH_SIZE = {"clock": True, "clockana": True, "music": True, "sys": True,
+             "miku": True, "prayer": True, "hijri": True, "pet": False}
+
+
+def load():
+    try:
+        return json.load(open(CFG)).get("widgets", {})
+    except Exception:
+        return {}
+
+
+def load_rules():
+    try:
+        return json.load(open(RULES))
+    except Exception:
+        return []
+
+
+def save_rules(list_rules):
+    try:
+        with open(RULES, "w") as f:
+            json.dump(list_rules, f)
+    except OSError:
+        pass
+
+
+def load_geom():
+    try:
+        return json.load(open(GEOM))
+    except Exception:
+        return {}
+
+
+def save_geom(d):
+    try:
+        with open(GEOM, "w") as f:
+            json.dump(d, f)
+    except OSError:
+        pass
+
+
+def hypr(arg):
+    subprocess.run(["hyprctl", "keyword", "windowrule", arg], capture_output=True)
+
+
+def is_running(pattern):
+    r = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+    return r.returncode == 0
+
+
+def spawn(path, key=""):
+    logf = open(os.path.join(os.path.expanduser("~/.cache"),
+                             "widgets-%s.log" % (key or os.path.basename(path))), "a")
+    subprocess.Popen(["setsid", "-f", path],
+                     stdin=subprocess.DEVNULL, stdout=logf, stderr=logf)
+
+
+def kill_by(pattern):
+    subprocess.run(["pkill", "-f", pattern], capture_output=True)
+
+
+def screen_size():
+    try:
+        out = json.loads(subprocess.run(["hyprctl", "-j", "monitors"],
+                                        capture_output=True, text=True).stdout)
+        m = next((x for x in out if x.get("focused")), out[0])
+        return m["width"], m["height"]
+    except Exception:
+        return 1920, 1080
+
+
+def main():
+    force = "--force-restart" in sys.argv
+    cfg = load()
+    stored = load_rules()
+    geom = load_geom()
+    scw, sch = screen_size()
+
+    for key in TITLES:
+        e = cfg.get(key, {})
+        enabled = bool(e.get("enabled"))
+        title = TITLES[key]
+        if key == "pet":
+            pat = "miku-pet"
+            script = os.path.join(BIN, "miku-pet")
+        else:
+            pat = "widget-%s" % key
+            script = os.path.join(BIN, "widget-%s" % key)
+
+        # unset every previous rule for this title (exact-match unset)
+        for old in stored:
+            if "title:%s" % title in old:
+                hypr("unset," + old)
+        stored = [r for r in stored if "title:%s" % title not in r]
+
+        if not enabled:
+            kill_by(pat)
+            geom[key] = None
+            continue
+
+        # glass widgets are BOTTOM-LAYER surfaces now: their position/size come
+        # from widgets.json read at startup (layer margins). hyprctl rules are
+        # only needed for pet (a normal floating window).
+        if key == "pet":
+            ws = int(e.get("workspace", 1) or 1)
+            x = int(e.get("x", 0.5) * scw)
+            y = int(e.get("y", 0.5) * sch)
+            w = max(80, int(e.get("w", 0.2) * scw))
+            h = max(30, int(e.get("h", 0.1) * sch))
+            gsig = (ws, x, y, w, h)
+            rules = ["float,title:%s" % title,
+                     "workspace %d silent,title:%s" % (ws, title),
+                     "move %d %d,title:%s" % (x, y, title)]
+            if WITH_SIZE[key]:
+                rules.append("size %d %d,title:%s" % (w, h, title))
+            if NOFOCUS[key]:
+                rules.append("nofocus,title:%s" % title)
+            for r in rules:
+                hypr(r)
+            stored.extend(rules)
+        else:
+            gsig = (int(e.get("x", 0.5) * scw), int(e.get("y", 0.5) * sch),
+                    int(e.get("w", 0.2) * scw), int(e.get("h", 0.1) * sch))
+
+        if force or geom.get(key) != gsig or not is_running(pat):
+            kill_by(pat)
+            spawn(script, key)
+            geom[key] = gsig
+
+    save_rules(stored)
+    save_geom(geom)
+
+    # cava: global bottom strip, toggled on/off only
+    ce = cfg.get("cava", {})
+    if ce.get("enabled"):
+        if not is_running("cava-dock"):
+            spawn(os.path.join(BIN, "cava-dock"), "cava")
+    else:
+        kill_by("cava-dock")
+
+
+if __name__ == "__main__":
+    main()

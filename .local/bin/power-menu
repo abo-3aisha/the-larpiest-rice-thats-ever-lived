@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Power-mode + Gaming toggle menu (battery on-click).
+# Labels come from the i18n engine; dispatch is by INDEX so a translated menu
+# can never fall through to the wrong profile.
 set -u
 NS="notify-send -u low -t 3000"
+B="$HOME/.local/bin"
+
+# shellcheck disable=SC1090
+eval "$("$B/i18n.py" dump)"
 
 GAMING="gaming-mode"
 prof() { powerprofilesctl get 2>/dev/null | tr 'A-Z' 'a-z'; }
@@ -11,19 +17,35 @@ profline() { # $1 label $2 mode
     if [ "$cur" = "$2" ]; then echo "✓ $1  󰫦 $2"; else echo "  $1  󰫦 $2"; fi
 }
 
-gstate=$([ -s "$HOME/.cache/gaming_prev" ] && echo "✓ Gaming ON 󰆍" || echo "  Gaming OFF 󰆍")
+GAMING_ICON=$'\uf0f9'   # Nerd Font gamepad
+if [ -s "$HOME/.cache/gaming_prev" ]; then
+    gstate="✓ $T_PM_GAMING_ON  $GAMING_ICON"
+else
+    gstate="  $T_PM_GAMING_OFF $GAMING_ICON"
+fi
 
-sel=$(printf '%s\n' \
-        "$(profline "󰌾 Power Saver"  power-saver)" \
-        "$(profline "󰾅 Balanced"      balanced)" \
-        "$(profline "󰓅 Performance"   performance)" \
+menu=$(printf '%s\n' \
+    "$(profline "󰌾 $T_PM_SAVER"      power-saver)" \
+    "$(profline "󰾅 $T_PM_BALANCED"   balanced)" \
+    "$(profline "󰓅 $T_PM_PERFORMANCE" performance)" \
     "───" \
-        "$gstate  (toggle)" \
-    | wofi --dmenu --prompt "Power 󰚥" --lines 8)
+    "$gstate  ($T_PM_TOGGLE)")
 
-case "$sel" in
-    *"Power Saver"*)  powerprofilesctl set power-saver;  $NS "󰌾 Power Saver" "Low battery usage · light service";;
-    *"Balanced"*)     powerprofilesctl set balanced;     $NS "󰾅 Balanced" "Balanced for everyday use";;
-    *"Performance"*)  powerprofilesctl set performance;  $NS "󰓅 Performance" "Max speed for gaming and heavy apps";;
-    *"Gaming"*)       gaming-mode toggle;;
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$T_APP_POWER 󰚥" --lines 8)
+[ -z "$sel" ] && exit 0
+
+mapfile -t rows < <(printf '%s\n' "$menu")
+pick=0
+for i in "${!rows[@]}"; do
+    [ "${rows[$i]}" = "$sel" ] && pick=$i && break
+done
+
+case "$pick" in
+    0) powerprofilesctl set power-saver
+       $NS "󰌾 $T_PM_SAVER" "$T_PM_SAVER_SUB" ;;
+    1) powerprofilesctl set balanced
+       $NS "󰾅 $T_PM_BALANCED" "$T_PM_BALANCED_SUB" ;;
+    2) powerprofilesctl set performance
+       $NS "󰓅 $T_PM_PERFORMANCE" "$T_PM_PERF_SUB" ;;
+    4) gaming-mode toggle ;;
 esac

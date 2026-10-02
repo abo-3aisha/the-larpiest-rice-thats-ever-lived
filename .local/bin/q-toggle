@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # Quick-settings toggle helper for the swaync control-center / Hyprland rice.
 # Guards every tool so a missing app shows a toast instead of breaking.
+eval "$("$HOME/.local/bin/i18n.py" dump)"
+
 notify() {
-    command -v notify-send >/dev/null 2>&1 && notify-send -t 2000 -u low "Quick Settings" "$1" 2>/dev/null
+    command -v notify-send >/dev/null 2>&1 && notify-send -t 2000 -u low "$T_QS_TITLE" "$1" 2>/dev/null
 }
 
 case "$1" in
   wifi-radio)
     if ! command -v nmcli >/dev/null 2>&1; then
-        notify "NetworkManager (nmcli) is not installed"
+        notify "$T_QS_NO_NMCLI"
         exit 0
     fi
     if [ "$(nmcli radio wifi 2>/dev/null)" = "enabled" ]; then
         nmcli radio wifi off >/dev/null 2>&1
-        notify "WiFi: OFF"
+        notify "$T_QS_WIFI: OFF"
     else
         nmcli radio wifi on >/dev/null 2>&1
-        notify "WiFi: ON"
+        notify "$T_QS_WIFI: ON"
     fi
     ;;
   wifi)
@@ -24,31 +26,31 @@ case "$1" in
     ;;
   bt)
     if ! command -v bluetoothctl >/dev/null 2>&1; then
-        notify "Bluetooth is not installed"
+        notify "$T_QS_BT is not installed"
         exit 0
     fi
     if bluetoothctl show 2>/dev/null | grep -q "Powered: yes"; then
         bluetoothctl power off >/dev/null 2>&1
-        notify "Bluetooth: OFF"
+        notify "$T_QS_BT: OFF"
     else
         bluetoothctl power on >/dev/null 2>&1
         sleep 1
         bluetoothctl agent on >/dev/null 2>&1
         bluetoothctl default-agent >/dev/null 2>&1
-        notify "Bluetooth: ON"
+        notify "$T_QS_BT: ON"
     fi
     ;;
   night)
     if pgrep -x gammastep >/dev/null 2>&1; then
         pkill -x gammastep
-        notify "Night light: OFF"
+        notify "$T_QS_NIGHT: OFF"
     else
         if command -v gammastep >/dev/null 2>&1; then
             gammastep >/dev/null 2>&1 &
             sleep 1
-            notify "Night light: ON"
+            notify "$T_QS_NIGHT: ON"
         else
-            notify "gammastep is not installed"
+            notify "$T_QS_NO_GAMMA"
         fi
     fi
     ;;
@@ -56,27 +58,27 @@ case "$1" in
     if command -v wpctl >/dev/null 2>&1; then
         wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+
     else
-        notify "pipewire (wpctl) is not installed"
+        notify "$T_QS_NO_WPCTL"
     fi
     ;;
   vol-down)
     if command -v wpctl >/dev/null 2>&1; then
         wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%-
     else
-        notify "pipewire (wpctl) is not installed"
+        notify "$T_QS_NO_WPCTL"
     fi
     ;;
   vol-mute)
     if ! command -v wpctl >/dev/null 2>&1; then
-        notify "pipewire (wpctl) is not installed"
+        notify "$T_QS_NO_WPCTL"
         exit 0
     fi
     if wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -q "MUTED"; then
         wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/dev/null 2>&1
-        notify "Volume: unmuted"
+        notify "$T_QS_VOL_ON"
     else
         wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 >/dev/null 2>&1
-        notify "Volume: muted"
+        notify "$T_QS_VOL_MUTE"
     fi
     ;;
   bright-up)
@@ -97,6 +99,6 @@ case "$1" in
     exec "$HOME/.local/bin/power-menu"
     ;;
   *)
-    notify "Unknown action: $1"
+    notify "$T_QS_UNKNOWN: $1"
     ;;
 esac

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Cycling Miku shoutout for the Eww widget (simple glyphs only, renders on any font).
+v0='♪ Miku-Miku ♪'
+v1='♡ 39-Philia ♡'
+v2='✧ 39 ✧'
+v3='Miku satisfied ✧ ω ✧'
+v4='(^_^) Miku-chan!'
+v5='♥ 39 forever ♥'
+i=$(( ($(date +%s)/2) % 6 ))
+eval "echo \"\$v$i\""

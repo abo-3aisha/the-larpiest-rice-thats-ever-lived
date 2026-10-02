@@ -21,6 +21,11 @@ INCLUDE_WAYBAR_CUSTOM = Path(HOME) / ".config" / "waybar" / "style.custom.css"
 OUT_SWAYNC_CSS = Path(HOME) / ".config" / "swaync" / "style.css"
 OUT_WOFI_CSS = Path(HOME) / ".config" / "wofi" / "style.css"
 FOOT_INI = Path(HOME) / ".config" / "foot" / "foot.ini"
+WEZTERM_LUA = Path(HOME) / ".config" / "wezterm" / "wezterm.lua"
+CONTOUR_YML = Path(HOME) / ".config" / "contour" / "contour.yml"
+KITTY_DIR = Path(HOME) / ".config" / "kitty"
+KITTY_THEME = KITTY_DIR / "theme.conf"
+EWW_COLORS = Path(HOME) / ".config" / "eww" / "colors.scss"
 FISH_COLORS = Path(HOME) / ".cache" / "wal" / "fish-colors.fish"
 FASTFETCH = Path(HOME) / ".config" / "fastfetch" / "config.jsonc"
 CAVA = Path(HOME) / ".config" / "cava" / "config"
@@ -695,7 +700,7 @@ SWAYNC_CSS = """* {{
 WOFI_CSS = """window {{
     background-color: rgba(20, 20, 23, 0.62);
     border-radius: 18px;
-    border: 1px solid #{accent}66;
+    border: 1px solid rgba({accent_rgb}, 0.40);
 }}
 
 #outer-box {{
@@ -706,7 +711,7 @@ WOFI_CSS = """window {{
 #input {{
     background-color: #2a2a30;
     color: #eff1f4;
-    border: 1px solid #{accent}88;
+    border: 1px solid rgba({accent_rgb}, 0.53);
     border-radius: 10px;
     padding: 8px 12px;
 }}
@@ -799,6 +804,231 @@ def sync_foot(theme):
                 "[scrollback]\nlines=10000\n\n[cursor]\nstyle=beam\nbeam-thickness=1.5\n")
     text = text.rstrip("\n") + "\n" + foot_sections(theme)
     diff_write(FOOT_INI, text)
+
+
+def sync_wezterm(theme):
+    """WezTerm gets the same ONE-engine colors as foot; only the flat
+    config.colors block (bounded by palette markers) is rewritten, so the
+    animated-caret settings and rice tweaks survive wallpaper changes."""
+    if not WEZTERM_LUA.exists():
+        return
+    text = WEZTERM_LUA.read_text(errors="replace")
+    lines = "\n".join(
+        '  %-22s = "#%s",' % (k, v)
+        for k, v in (("background", theme["bg"]),
+                     ("foreground", theme["fg"]),
+                     ("cursor_bg", theme["accent"]),
+                     ("cursor_fg", theme["bg"]),
+                     ("cursor_border", theme["accent"]),
+                     ("selection_bg", theme["accent"]),
+                     ("selection_fg", theme["bg"])))
+    pat = r"--\[\[palette-start\]\].*?--\[\[palette-end\]\]"
+    new, n = re.subn(pat, "--[[palette-start]]\n" + lines +
+                     "\n  --[[palette-end]]", text, flags=re.S)
+    if n:
+        diff_write(WEZTERM_LUA, new)
+
+
+CONTOUR_SCHEME = """# @@contour-color-start@@
+    default:
+        # Default colors
+        default:
+            background: '%(bg)s'
+            foreground: '%(fg)s'
+            bright_foreground: '%(fg)s'
+            dimmed_foreground: '%(dim)s'
+        hyperlink_decoration:
+            normal: '%(dim)s'
+            hover: '%(hl)s'
+        vi_mode_highlight:
+            foreground: CellForeground
+            foreground_alpha: 1
+            background: '%(acc)s'
+            background_alpha: 0.5
+        vi_mode_cursorline:
+            foreground: '%(fg)s'
+            foreground_alpha: 0.2
+            background: '%(acc)s'
+            background_alpha: 0.4
+        selection:
+            foreground: CellForeground
+            foreground_alpha: 1
+            background: '%(acc)s'
+            background_alpha: 0.5
+        search_highlight:
+            foreground: CellBackground
+            foreground_alpha: 1
+            background: '%(acc)s'
+            background_alpha: 1
+        search_highlight_focused:
+            foreground: CellBackground
+            foreground_alpha: 1
+            background: '%(hl)s'
+            background_alpha: 1
+        word_highlight_current:
+            foreground: CellForeground
+            foreground_alpha: 1
+            background: '%(hl)s'
+            background_alpha: 0.6
+        word_highlight_other:
+            foreground: CellForeground
+            foreground_alpha: 1
+            background: '%(acc)s'
+            background_alpha: 0.35
+        hint_label:
+            foreground: '%(on)s'
+            foreground_alpha: 1
+            background: '%(acc)s'
+            background_alpha: 1
+        hint_match:
+            foreground: CellForeground
+            foreground_alpha: 1
+            background: '%(acc)s'
+            background_alpha: 0.35
+        indicator_statusline:
+            default:
+                foreground: '%(on)s'
+                background: '%(acc)s'
+            inactive:
+                foreground: '%(dim)s'
+                background: '%(sfc)s'
+        input_method_editor:
+            foreground: '%(on)s'
+            background: '%(acc2)s'
+        # Normal colors
+        normal:
+            black:   '#0c0e12'
+            red:     '#d8646f'
+            green:   '#7fc88f'
+            yellow:  '#d0b26a'
+            blue:    '%(acc)s'
+            magenta: '#c07fc4'
+            cyan:    '#6fb7bf'
+            white:   '#c6cad4'
+        # Bright colors
+        bright:
+            black:   '#565c68'
+            red:     '#e88088'
+            green:   '#97d9a4'
+            yellow:  '#e6cd8c'
+            blue:    '%(hl)s'
+            magenta: '#d8a2dc'
+            cyan:    '%(hl)s'
+            white:   '%(fg)s'
+    wallpaper:
+        # inherits ALL values from the `default` scheme above
+# @@contour-color-end@@
+"""
+
+
+def _contour_dat(theme):
+    """The substitution set CONTOUR_SCHEME is rendered with. Shared so kitty
+    renders the exact same scheme instead of keeping a second copy of colors."""
+    acc = tuple(int(theme["accent"][i:i + 2], 16) for i in (0, 2, 4))
+    fg = tuple(int(theme["fg"][i:i + 2], 16) for i in (0, 2, 4))
+    return dict(
+        bg="#" + theme["bg"],
+        fg="#" + theme["fg"],
+        dim="#" + theme.get("fg_dim", theme["fg"]),
+        sfc="#" + theme["surface"],
+        on="#" + theme.get("on_accent", theme["fg"]),
+        acc2="#" + theme["accent2"],
+        acc="#" + theme["accent"],
+        hl="#" + to_hex(blend(acc, fg, 0.4)))
+
+def write_contour(theme):
+    """Contour gets ONE-engine colors too: the `wallpaper` scheme in
+    contour.yml (bounded by palette markers) is rewritten on every theme
+    change. live_config: true lets a running Contour pick it up instantly.
+    The cursor-motion/smooth-scroll rice settings live OUTSIDE the markers
+    and survive regenerations."""
+    if not CONTOUR_YML.exists():
+        return
+    text = CONTOUR_YML.read_text(errors="replace")
+    block = CONTOUR_SCHEME % _contour_dat(theme)
+    start = "# @@contour-color-start@@\n"
+    end = "# @@contour-color-end@@\n"
+    pat = re.escape(start) + r".*?" + re.escape(end)
+    new, n = re.subn(pat, block, text, flags=re.S)
+    if not n:
+        # First integration (or a generated config that lost the markers):
+        # replace the whole color_schemes block up to the next top-level key.
+        m = re.search(r"(?m)^color_schemes:.*?(?=^# |^\S)", text, flags=re.S)
+        if not m:
+            diff_write(CONTOUR_YML, new + "\ncolor_schemes:\n" + block)
+            return
+        text = text[:m.start()] + block + text[m.end():]
+    new = text
+    new, n = re.subn(r"(?m)^(\s*)colors:\s*\S+", "\\1colors: wallpaper", new, count=1)
+    diff_write(CONTOUR_YML, new)
+def write_kitty(theme):
+    """kitty is kept visually identical to Contour on purpose. It MIRRORS the
+    rendered scheme already sitting in contour.yml rather than re-rendering the
+    template from the theme dict: contour.yml is what the user is actually
+    looking at, so reading it back makes drift between the two impossible even
+    if a fallback theme is ever passed in. kitty has no cursor motion
+    animation, which is the one Contour-only feature kept here."""
+    if not KITTY_DIR.exists() or not CONTOUR_YML.exists():
+        return
+    live = CONTOUR_YML.read_text(errors="replace")
+    blk = re.search(r"# @@contour-color-start@@(.*?)# @@contour-color-end@@",
+                    live, re.S)
+    if not blk:
+        return
+    m = re.search(r"# Normal colors(.*?)# Bright colors(.*?)\n    wallpaper:",
+                  blk.group(1), re.S)
+    if not m:
+        return
+    cols = [c.strip("'") for c in
+            re.findall(r"'#[0-9a-fA-F]{6}'", m.group(1) + m.group(2))]
+    if len(cols) < 16:
+        return
+    bg = re.search(r"background: '(#[0-9a-fA-F]{6})'", blk.group(1))
+    fg = re.search(r"^\s+foreground: '(#[0-9a-fA-F]{6})'", blk.group(1), re.M)
+    acc = re.search(r"search_highlight:\n\s+foreground: CellBackground.*?"
+                    r"\n\s+background: '(#[0-9a-fA-F]{6})'", blk.group(1), re.S)
+    if not (bg and fg):
+        return
+    bg, fg = bg.group(1), fg.group(1)
+    acc = acc.group(1) if acc else fg
+    lines = [
+        "# @@kitty-color-start@@",
+        "# generated by palette.py - do not edit by hand",
+        "# mirrors the rendered scheme in contour.yml so both terminals match",
+        "",
+    ]
+    for i, v in enumerate(cols[:16]):
+        lines.append("color%-2d %s" % (i, v))
+    lines += [
+        "",
+        "foreground      %s" % fg,
+        "background      %s" % bg,
+        "selection_foreground %s" % bg,
+        "selection_background %s" % acc,
+        "cursor          %s" % fg,
+        "cursor_text_color %s" % bg,
+        "url_color       %s" % acc,
+        "",
+        "# @@kitty-color-end@@",
+        "",
+    ]
+    diff_write(KITTY_THEME, "\n".join(lines))
+
+
+def sync_eww(theme):
+    """Write the SCSS color variables that ~/.config/eww/eww.scss imports."""
+    if not (Path(HOME) / ".config" / "eww" / "eww.scss").exists():
+        return
+    bg = theme["bg"]
+    r, g, b = int(bg[0:2], 16), int(bg[2:4], 16), int(bg[4:6], 16)
+    lines = [
+        "$bg: #%s;" % theme["bg"],
+        "$fg: #%s;" % theme["fg"],
+        "$accent: #%s;" % theme["accent"],
+        "$accent2: #%s;" % theme["accent2"],
+        "$glass: rgba(%d, %d, %d, 0.55);" % (r, g, b),
+    ]
+    diff_write(EWW_COLORS, "\n".join(lines) + "\n")
 
 
 def write_fish_colors(theme):
@@ -918,26 +1148,165 @@ def ensure_dir(path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def sync_qt_scheme(mode):
-    scheme = "BreezeDarkOrange" if mode == "dark" else "BreezeLightOrange"
-    accent = "233,100,58"  # keep the user's identity accent (orange) in both modes
-    if shutil.which("plasma-apply-colorscheme"):
+def hx_rgb(h):
+    """'aabbcc' -> 'r,g,b' string for KDE .colors files."""
+    try:
+        return "%d,%d,%d" % (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        return "233,100,58"
+
+
+def write_kde_scheme(theme):
+    """KDE color scheme (Dolphin + all Qt/KDE apps) generated from the SAME
+    theme dict as waybar/swaync/wofi/foot/GTK, so every app follows the
+    wallpaper accent — the old code pinned BreezeDarkOrange + a fixed orange
+    AccentColor, which is exactly why Dolphin never matched the wallpaper."""
+    name = "WallpaperAccent"
+    out = Path(HOME) / ".local" / "share" / "color-schemes" / (name + ".colors")
+    bg = theme["bg"]; surface = theme["surface"]; fg = theme["fg"]
+    dim = theme.get("fg_dim", fg); acc = theme["accent"]; acc2 = theme["accent2"]
+    on_acc = theme.get("on_accent", fg)
+
+    err = hx_rgb((to_hex((0xFF, 0x5D, 0x63))))
+    neu = hx_rgb(acc2); pos = hx_rgb(acc2)
+
+    def view_section(grp, background, background_alt, normal):
+        return (
+            "[Colors:%s]\n"
+            "BackgroundAlternate=%s\n"
+            "BackgroundNormal=%s\n"
+            "DecorationFocus=%s\n"
+            "DecorationHover=%s\n"
+            "ForegroundActive=%s\n"
+            "ForegroundInactive=%s\n"
+            "ForegroundLink=%s\n"
+            "ForegroundNegative=" + err + "\n"
+            "ForegroundNeutral=" + neu + "\n"
+            "ForegroundNormal=%s\n"
+            "ForegroundPositive=" + pos + "\n"
+            "ForegroundVisited=" + neu + "\n"
+        ) % (grp, hx_rgb(background_alt), hx_rgb(background), hx_rgb(acc), hx_rgb(acc),
+             hx_rgb(acc), hx_rgb(dim), hx_rgb(acc2), hx_rgb(normal))
+
+    scheme = (
+        "[KDE]\ncontrast=4\n\n"
+        "[General]\nColorScheme=%s\nName=%s\n\n"
+    ) % (name, name)
+    scheme += view_section("Button", surface, bg, fg)
+    scheme += "\n" + view_section("Complementary", bg, surface, fg)
+    scheme += "\n" + view_section("Header", acc, bg, on_acc)
+    scheme += "\n" + view_section("Tooltip", surface, bg, fg)
+    scheme += "\n" + view_section("View", bg, surface, fg)
+    scheme += "\n" + view_section("Window", bg, surface, fg)
+    scheme += "\n"
+    sel_bg = hx_rgb(acc); sel_fg = on_acc
+    dim_c = hx_rgb(dim); acc_c = hx_rgb(acc); fg_c = hx_rgb(fg); bg_c = hx_rgb(bg)
+    scheme += (
+        "[Colors:Selection]\n"
+        "BackgroundAlternate=" + sel_bg + "\n"
+        "BackgroundNormal=" + sel_bg + "\n"
+        "DecorationFocus=" + acc_c + "\n"
+        "DecorationHover=" + acc_c + "\n"
+        "ForegroundActive=" + fg_c + "\n"
+        "ForegroundInactive=" + dim_c + "\n"
+        "ForegroundLink=" + neu + "\n"
+        "ForegroundNegative=" + err + "\n"
+        "ForegroundNeutral=" + neu + "\n"
+        "ForegroundNormal=" + sel_fg + "\n"
+        "ForegroundPositive=" + pos + "\n"
+        "ForegroundVisited=" + neu + "\n"
+        "\n"
+        "[ColorEffects:Disabled]\n"
+        "Color=" + dim_c + "\n"
+        "ColorAmount=0\n"
+        "ColorEffect=0\n"
+        "ContrastAmount=0.65\n"
+        "ContrastEffect=1\n"
+        "IntensityAmount=0.1\n"
+        "IntensityEffect=2\n"
+        "\n"
+        "[WM]\n"
+        "activeBackground=" + acc_c + "\n"
+        "activeBlend=" + fg_c + "\n"
+        "activeForeground=" + sel_fg + "\n"
+        "inactiveBackground=" + bg_c + "\n"
+        "inactiveBlend=" + dim_c + "\n"
+        "inactiveForeground=" + dim_c + "\n"
+    )
+    diff_write(out, scheme)
+    return name
+
+
+def qt6_palette(accent, on_acc, fg, dim, bg, surface, link):
+    """Build the 22 QPalette fields (order used by qt6ct, see noctalia.conf):
+    windowText,button,light,midlight,dark,mid,text,brightText,buttonText,
+    base,window,shadow,highlight,highlightedText,link,linkVisited,alternateBase,
+    NO_IDEA,toolTipBase,toolTipText,placeholderText,accent"""
+    def hx(h6):
+        return "#" + h6
+    active = [
+        fg, surface, surface, surface, bg, bg, fg, on_acc, fg,
+        bg, bg, "000000", accent, on_acc, link, link, surface,
+        surface, surface, fg, dim, accent,
+    ]
+    disabled = [
+        dim, surface, surface, surface, bg, bg, dim, on_acc, dim,
+        bg, bg, "000000", dim, bg, dim, dim, surface,
+        surface, surface, dim, dim, dim,
+    ]
+    return ("[ColorScheme]\n"
+            "#active/disabled/inactive QPalette lists (qt6ct format)\n"
+            "active_colors=" + ", ".join(hx(c) for c in active) + "\n"
+            "disabled_colors=" + ", ".join(hx(c) for c in disabled) + "\n"
+            "inactive_colors=" + ", ".join(hx(c) for c in active) + "\n")
+
+
+def write_qt6ct_palette(theme):
+    """qt6ct (Fusion + custom palette) is what actually colors Dolphin/Qt on
+    this machine — it overrides the KDE color scheme entirely. Mirror the
+    theme dict into a qt6ct palette AND point qt6ct.conf at it (absolute
+    path; the old value had an unexpanded literal '$USER')."""
+    conf_dir = Path(HOME) / ".config" / "qt6ct" / "colors"
+    conf_path = conf_dir / "WallpaperAccent.conf"
+    ensure_dir(conf_dir)
+    diff_write(conf_path, qt6_palette(
+        theme["accent"], theme["on_accent"], theme["fg"],
+        theme.get("fg_dim", theme["fg"]), theme["bg"],
+        theme["surface"], theme["accent2"]))
+
+    qt6ct_conf = Path(HOME) / ".config" / "qt6ct" / "qt6ct.conf"
+    if qt6ct_conf.exists():
         try:
-            subprocess.run(["plasma-apply-colorscheme", scheme], capture_output=True)
+            lines = qt6ct_conf.read_text().splitlines()
+            target = str(conf_path)
+            changed = False
+            for i, line in enumerate(lines):
+                if line.startswith("color_scheme_path=") and line != "color_scheme_path=" + target:
+                    lines[i] = "color_scheme_path=" + target
+                    changed = True
+            if changed:
+                diff_write(qt6ct_conf, "\n".join(lines) + "\n")
         except Exception:
             pass
+
+
+def sync_qt_scheme(theme, mode):
+    name = write_kde_scheme(theme)
+    write_qt6ct_palette(theme)
+    accent_rgb = hx_rgb(theme["accent"])  # wallpaper accent, NOT a fixed orange
     if shutil.which("kwriteconfig6"):
-        try:
-            subprocess.run(
-                ["kwriteconfig6", "--file", "kdeglobals", "--group", "KDE", "--key", "ColorScheme", scheme],
-                capture_output=True,
-            )
-            subprocess.run(
-                ["kwriteconfig6", "--file", "kdeglobals", "--group", "General", "--key", "AccentColor", accent],
-                capture_output=True,
-            )
-        except Exception:
-            pass
+        for group, key, value in (
+            ("General", "ColorScheme", name),
+            ("KDE", "ColorScheme", name),
+            ("General", "AccentColor", accent_rgb),
+        ):
+            try:
+                subprocess.run(
+                    ["kwriteconfig6", "--file", "kdeglobals", "--group", group, "--key", key, value],
+                    capture_output=True,
+                )
+            except Exception:
+                pass
     sync_gtk_scheme(mode)
 
 
@@ -970,6 +1339,7 @@ def generate(theme):
     ensure_dir(OUT_LUA)
     diff_write(OUT_LUA, THEME_LUA.format(**theme))
     theme = dict(theme)
+    theme["accent_rgb"] = ", ".join(str(int(theme["accent"][i:i + 2], 16)) for i in (0, 2, 4))
     theme["glass"] = rgba_from(theme["surface"], "0.40")
     theme["glass_hover"] = rgba_from(theme["surface"], "0.55")
     theme["cc_bg"] = rgba_from(theme["bg"], "0.80")  # solid-ish control-center (no panel blur)
@@ -979,7 +1349,8 @@ def generate(theme):
         custom = INCLUDE_WAYBAR_CUSTOM.read_text()
         for k, v in theme.items():
             if isinstance(v, str):
-                custom = custom.replace("@" + k + "@", "#" + v)
+                repl = v if k.endswith("_rgb") else "#" + v
+                custom = custom.replace("@" + k + "@", repl)
         css += custom + "\n"
     diff_write(OUT_WAYBAR_CSS, css)
     ensure_dir(OUT_SWAYNC_CSS)
@@ -987,13 +1358,19 @@ def generate(theme):
     ensure_dir(OUT_WOFI_CSS)
     diff_write(OUT_WOFI_CSS, WOFI_CSS.format(**theme))
     sync_foot(theme)
+    sync_wezterm(theme)
+    write_contour(theme)
+    write_kitty(theme)
+    sync_eww(theme)
     write_fish_colors(theme)
     write_fastfetch(theme)
     write_cava(theme)
     write_gtk_accent(theme)
-    sync_qt_scheme(theme["mode"])
+    sync_qt_scheme(theme, theme["mode"])
     forbidden_hit = []
-    for path in (OUT_LUA, OUT_WAYBAR_CSS, OUT_SWAYNC_CSS, OUT_WOFI_CSS, FOOT_INI, FISH_COLORS, FASTFETCH, CAVA):
+    for path in (OUT_LUA, OUT_WAYBAR_CSS, OUT_SWAYNC_CSS, OUT_WOFI_CSS, FOOT_INI, WEZTERM_LUA, EWW_COLORS, FISH_COLORS, FASTFETCH, CAVA,
+                 Path(HOME) / ".local" / "share" / "color-schemes" / "WallpaperAccent.colors",
+                 CONTOUR_YML):
         try:
             text = path.read_text(errors="replace").lower()
         except Exception:
@@ -1009,8 +1386,20 @@ def generate(theme):
         print("[palette] replaced with accent %s" % theme["accent"], flush=True)
 
 
+def _gi_usable():
+    """The glass widgets need PyGObject. A Python that cannot import it must not
+    restart them: the widget would die on the first require_version() and the
+    desktop would be left with no widgets at all."""
+    try:
+        import gi
+        return hasattr(gi, "require_version")
+    except Exception:
+        return False
+
+
 def reload():
-    if shutil.which("hyprctl"):
+    live = bool(shutil.which("hyprctl"))
+    if live:
         subprocess.run(["hyprctl", "reload"], capture_output=True)
     if shutil.which("swaync-client"):
         subprocess.run(["swaync-client", "-R"], capture_output=True)
@@ -1018,6 +1407,41 @@ def reload():
     if shutil.which("waybar") and subprocess.run(["pgrep", "-x", "waybar"], capture_output=True).returncode == 0:
         subprocess.run(["pkill", "-x", "waybar"], capture_output=True)
         subprocess.Popen(["setsid", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if shutil.which("cava-dock") and Path(HOME, ".local", "bin", "cava-dock").is_file():
+        # Respect the widget-manager toggle: only restart the EQ when enabled.
+        wcfg = Path(HOME, ".config", "widgets", "widgets.json")
+        enabled = True
+        if wcfg.is_file():
+            try:
+                data = json.loads(wcfg.read_text()).get("widgets", {})
+                enabled = bool(data.get("cava", {}).get("enabled", True))
+            except Exception:
+                pass
+        if not enabled:
+            subprocess.run(["pkill", "-f", "cava-dock"], capture_output=True)
+        elif not _gi_usable():
+            print("palette.py: PyGObject unavailable here; not restarting cava-dock")
+        else:
+            # -f (the process runs as python3, so -x by name never matches), then
+            # drop the stale pidfile BEFORE starting or the new instance refuses.
+            subprocess.run(["pkill", "-f", "cava-dock"], capture_output=True)
+            time.sleep(0.4)
+            Path(HOME + "/.cache/cava-dock.pid").unlink(missing_ok=True)
+            subprocess.Popen(["setsid", HOME + "/.local/bin/cava-dock"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Glass widgets read their accent at startup, so re-spawn them on every
+    # theme reload to pick up the new wallpaper accent. Both the widgets and
+    # cava-dock are PyGObject programs: only restart them when this Python can
+    # actually run them, otherwise they come back dead and the desktop ends up
+    # with nothing instead of the old (stale-coloured) copy.
+    wa = HOME + "/.local/bin/widgets-apply"
+    if os.path.isfile(wa) and live and _gi_usable():
+        subprocess.Popen(["setsid", wa, "--force-restart"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif os.path.isfile(wa) and not _gi_usable():
+        print("palette.py: PyGObject unavailable here; leaving the widgets "
+              "alone (run palette.py from your own terminal to re-tint them)")
 
 
 def apply(wallpaper, do_reload):

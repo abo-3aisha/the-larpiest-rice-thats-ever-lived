@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# bolt-acmon — watches the charger and the charge state, and plays one small
+# soft chime per transition. Minimal by design: no notifications, no icons, no
+# loops, nothing on screen. Just the sound.
+#
+# Sounds (regenerate with make-charge-sounds):
+#   charge-on.ogg    charger plugged in
+#   charge-off.ogg   charger pulled out
+#   charge-full.ogg  reached 100%
+#
+# It polls once a second and forks only on the second a sound actually plays,
+# so the steady-state cost is a single sleep. Everything it reads is read with
+# the `read` builtin; sysfs attributes have no trailing newline, so read exits
+# non-zero at EOF even when it filled the variable — never branch on its exit
+# code, clear the variable first and test its value.
+set -u
+
+DIR="$HOME/.local/share/sounds"
+
+# The same battery pick as battery-bar.sh / bolt-indicator.sh: type Battery,
+# present, highest capacity.
+battery_path() {
+    local best="" bestcap=-1 b type present cap
+    for b in /sys/class/power_supply/BAT*; do
+        [ -d "$b" ] || continue
+        type=""; read -r type < "$b/type" 2>/dev/null
+        [ "$type" = "Battery" ] || continue
+        if [ -f "$b/present" ]; then
+            present=""; read -r present < "$b/present" 2>/dev/null
+            [ "$present" = "1" ] || continue
+        fi
+        cap=""; read -r cap < "$b/capacity" 2>/dev/null
+        case "$cap" in
+            '' | *[!0-9]*) continue ;;
+        esac
+        if [ "$cap" -gt "$bestcap" ]; then best="$b"; bestcap="$cap"; fi
+    done
+    printf '%s' "$best"
+}
+
+on_ac() {
+    local p v
+    for p in /sys/class/power_supply/*/online; do
+        [ -f "$p" ] || continue
+        v=""; read -r v < "$p" 2>/dev/null
+        [ "$v" = "1" ] && return 0
+    done
+    return 1
+}
+
+play() {
+    [ -f "$DIR/$1" ] || return 0
+    (ffplay -autoexit -nodisp -v error -i "$DIR/$1" >/dev/null 2>&1 &)
+}
+
+# Seed the state on the first pass so starting the service never makes a noise.
+# last_ac is the plug state we last acted on, last_status the charge status.
+bat="$(battery_path)"
+status=""
+[ -n "$bat" ] && { status=""; read -r status < "$bat/status" 2>/dev/null; }
+if on_ac; then last_ac=1; else last_ac=0; fi
+last_status="$status"
+
+while true; do
+    sleep 1.0
+
+    ac=0
+    on_ac && ac=1
+
+    bat="$(battery_path)"
+    status=""
+    [ -n "$bat" ] && { status=""; read -r status < "$bat/status" 2>/dev/null; }
+
+    # Plug / unplug.
+    if [ "$ac" != "$last_ac" ]; then
+        if [ "$ac" = "1" ]; then play charge-on.ogg; else play charge-off.ogg; fi
+        last_ac=$ac
+        # Unplugging resets the 100% latch so the next full charge can announce
+        # itself again.
+        [ "$ac" = "0" ] && last_status=""
+    fi
+
+    # Reached full while plugged in. Latched on last_status so it fires once
+    # per charge, not once per second.
+    if [ "$ac" = "1" ] && [ "$status" = "Full" ] && [ "$last_status" != "Full" ]; then
+        play charge-full.ogg
+    fi
+
+    [ "$status" != "$last_status" ] && last_status="$status"
+done

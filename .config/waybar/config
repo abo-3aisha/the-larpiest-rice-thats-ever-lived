@@ -86,9 +86,9 @@
     },
     "custom/bolt": {
         "exec": "/home/abo3aisha/.local/bin/bolt-indicator.sh",
-        "interval": 10,
+        "interval": 0.2,
         "return-type": "json",
-        "tooltip": false
+        "tooltip": true
     },
     "custom/battery": {
         "exec": "/home/abo3aisha/.local/bin/battery-bar.sh",

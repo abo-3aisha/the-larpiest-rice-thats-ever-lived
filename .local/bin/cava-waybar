@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+# Streams cava raw frames as a gold EQ line for the bottom waybar strip.
+# Differences vs terminal use: fewer, wider bars; a slow "calm" gate so that
+# silence shows a STATIC gentle ridge (never a sweeping line); fast attack /
+# slower release smoothing.
+import math
+import os
+import subprocess
+import sys
+
+CONF = os.path.expanduser("~/.config/cava/raw.conf")
+BARS = 20
+FRAME = BARS * 2
+CHARS = " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+_sm = [0.0] * BARS
+_calm = 0
+
+proc = subprocess.Popen(["cava", "-p", CONF], stdout=subprocess.PIPE)
+try:
+    while True:
+        chunk = proc.stdout.read(FRAME)
+        if len(chunk) < FRAME:
+            break
+        buf = list(chunk)
+        vals = [(buf[i] + (buf[i + 1] << 8)) / 65536.0 for i in range(0, FRAME, 2)]
+        for i, v in enumerate(vals):
+            _sm[i] = 0.82 * _sm[i] + 0.18 * v
+        mean = sum(_sm) / BARS
+        if mean < 0.006:
+            _calm += 1
+        else:
+            _calm = 0
+        if _calm >= 15:
+            out = [max(0.01, min(1.0, math.sin(i * 0.55) * 0.05 + 0.06)) for i in range(BARS)]
+        else:
+            out = list(_sm)
+        line = "".join(CHARS[min(8, int(v * 8 + 0.5))] for v in out)
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+finally:
+    try:
+        proc.kill()
+    except Exception:
+        pass

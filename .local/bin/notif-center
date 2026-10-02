@@ -3,7 +3,7 @@
 # Starts swaync if it is down, reloads config+styles, then toggles the panel.
 if ! command -v swaync >/dev/null 2>&1 || ! command -v swaync-client >/dev/null 2>&1; then
     command -v notify-send >/dev/null 2>&1 && \
-        notify-send -t 4000 -u critical "Notification Center" "swaync is not installed — install it (sudo pacman -S swaync)" 2>/dev/null
+        notify-send -t 4000 -u critical "$T_APP_NOTIFICATION_CENTER" "$T_NC_NO_SWAYNC: sudo pacman -S swaync" 2>/dev/null
     exit 1
 fi
 

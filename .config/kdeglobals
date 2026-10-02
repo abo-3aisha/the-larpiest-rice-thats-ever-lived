@@ -1,0 +1,207 @@
+[ColorEffects:Disabled]
+ChangeSelectionColor=
+Color=56,56,56
+ColorAmount=0
+ColorEffect=0
+ContrastAmount=0.65
+ContrastEffect=1
+Enable=
+IntensityAmount=0.1
+IntensityEffect=2
+
+[ColorEffects:Inactive]
+ChangeSelectionColor=true
+Color=112,111,110
+ColorAmount=0.025
+ColorEffect=2
+ContrastAmount=0.1
+ContrastEffect=2
+Enable=true
+IntensityAmount=0
+IntensityEffect=0
+
+[Colors:Button]
+BackgroundAlternate=153,109,70
+BackgroundNormal=41,44,48
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=161,169,177
+ForegroundLink=202,138,80
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=252,252,252
+ForegroundPositive=39,174,96
+ForegroundVisited=120,127,48
+
+[Colors:Complement]
+BackgroundAlternate=215,216,218
+BackgroundNegative=218,68,83
+BackgroundNeutral=246,116,0
+BackgroundNormal=233,234,236
+BackgroundPositive=39,174,96
+DecorationFocus=233,100,58
+DecorationHover=233,100,58
+ForegroundActive=233,100,58
+ForegroundInactive=152,155,160
+ForegroundLink=41,128,185
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=21,21,21
+ForegroundPositive=39,174,96
+ForegroundVisited=120,127,48
+
+[Colors:Complementary]
+BackgroundAlternate=30,87,116
+BackgroundNormal=32,35,38
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=161,169,177
+ForegroundLink=202,138,80
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=252,252,252
+ForegroundPositive=39,174,96
+ForegroundVisited=155,89,182
+
+[Colors:Header]
+BackgroundAlternate=32,35,38
+BackgroundNormal=141,96,56
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=161,169,177
+ForegroundLink=202,138,80
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=255,255,255
+ForegroundPositive=39,174,96
+ForegroundVisited=155,89,182
+
+[Colors:Header][Inactive]
+BackgroundAlternate=41,44,48
+BackgroundNormal=0,0,0
+DecorationFocus=233,174,55
+DecorationHover=233,166,71
+ForegroundActive=61,174,233
+ForegroundInactive=161,169,177
+ForegroundLink=29,153,243
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=153,153,153
+ForegroundPositive=39,174,96
+ForegroundVisited=120,127,48
+
+[Colors:Selection]
+BackgroundAlternate=141,96,56
+BackgroundNormal=141,96,56
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=255,255,255
+ForegroundLink=147,101,58
+ForegroundNegative=176,55,69
+ForegroundNeutral=198,92,0
+ForegroundNormal=255,255,255
+ForegroundPositive=23,104,57
+ForegroundVisited=120,127,48
+
+[Colors:Tooltip]
+BackgroundAlternate=32,35,38
+BackgroundNormal=218,234,255
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=161,169,177
+ForegroundLink=147,101,58
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=252,252,252
+ForegroundPositive=39,174,96
+ForegroundVisited=120,127,48
+
+[Colors:View]
+BackgroundAlternate=29,31,34
+BackgroundNormal=0,0,0
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=161,169,177
+ForegroundLink=202,138,80
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=252,252,252
+ForegroundPositive=39,174,96
+ForegroundVisited=120,127,48
+
+[Colors:Window]
+BackgroundAlternate=41,44,48
+BackgroundNormal=0,0,0
+DecorationFocus=202,138,80
+DecorationHover=202,138,80
+ForegroundActive=202,138,80
+ForegroundInactive=161,169,177
+ForegroundLink=202,138,80
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=252,252,252
+ForegroundPositive=39,174,96
+ForegroundVisited=120,127,48
+
+[General]
+AccentColor=215,204,0
+ColorScheme=WallpaperAccent
+ColorSchemeHash=a278bf628b9a3a52b9a8913c343d0311bfac2195
+LastUsedCustomAccentColor=215,204,0
+TerminalApplication=kitty
+XftAntialias=true
+XftHintStyle=hintslight
+XftSubPixel=none
+accentColorFromWallpaper=true
+fixed=CaskaydiaCove Nerd Font,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0
+font=CaskaydiaCove Nerd Font Mono,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0
+menuFont=CaskaydiaCove Nerd Font Mono,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0
+smallestReadableFont=CaskaydiaCove Nerd Font Mono,8,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0
+toolBarFont=CaskaydiaCove Nerd Font,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0
+
+[Icons]
+Theme=Tela-circle-purple-dark
+
+[KDE]
+ColorScheme=WallpaperAccent
+DndBehavior=MoveIfSameDevice
+LookAndFeelPackage=org.kde.breezedark.desktop
+contrast=4
+frameContrast=0.2
+widgetStyle=Breeze
+
+[KFileDialog Settings]
+Allow Expansion=false
+Automatically select filename extension=true
+Breadcrumb Navigation=true
+Decoration position=2
+Show Full Path=false
+Show Inline Previews=true
+Show Preview=false
+Show Speedbar=true
+Show hidden files=true
+Sort by=Name
+Sort directories first=true
+Sort hidden files last=false
+Sort reversed=false
+Speedbar Width=157
+View Style=DetailTree
+
+[QtQuickRendererSettings]
+SceneGraphBackend=software
+
+[WM]
+activeBackground=141,96,56
+activeBlend=252,252,252
+activeFont=CaskaydiaCove Nerd Font Propo,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0
+activeForeground=255,255,255
+idleBlend=233,100,58
+inactiveBackground=32,36,40
+inactiveBlend=161,169,177
+inactiveForeground=161,169,177

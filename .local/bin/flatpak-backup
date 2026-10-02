@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# flatpak-backup [DIR] — full backup of flatpak apps into DIR (default /mnt/hdd).
+set -u
+DIR="${1:-/mnt/hdd}"
+
+[ -d "$DIR" ] || { echo "HDD not mounted at: $DIR"; exit 1; }
+command -v flatpak >/dev/null 2>&1 || { echo "flatpak is not installed"; exit 1; }
+
+STAMP="$(date +%Y%m%d-%H%M)"
+
+# 1) system apps (/var/lib/flatpak) — the main one
+if [ -d /var/lib/flatpak ]; then
+    OUT="$DIR/flatpak-apps-$STAMP.tar.gz"
+    echo ">>> backing up /var/lib/flatpak -> $OUT"
+    sudo tar czf "$OUT" -C / var/lib/flatpak || { echo "backup failed"; exit 1; }
+    echo "    OK ($(du -h "$OUT" | cut -f1))"
+else
+    echo "no /var/lib/flatpak, skipping"
+fi
+
+# 2) user apps (~/.local/share/flatpak), if any
+if [ -d "$HOME/.local/share/flatpak" ]; then
+    OUT2="$DIR/flatpak-user-$STAMP.tar.gz"
+    echo ">>> backing up ~/.local/share/flatpak -> $OUT2"
+    tar czf "$OUT2" -C "$HOME" .local/share/flatpak || { echo "user backup failed"; exit 1; }
+    echo "    OK ($(du -h "$OUT2" | cut -f1))"
+else
+    echo "no ~/.local/share/flatpak, skipping"
+fi
+
+# 3) app data/settings (save files, configs) — the part that hurts to lose
+if [ -d "$HOME/.var/app" ]; then
+    OUT3="$DIR/flatpak-varapp-$STAMP.tar.gz"
+    echo ">>> backing up ~/.var/app (app data) -> $OUT3"
+    tar czf "$OUT3" -C "$HOME" .var/app || { echo "data backup failed"; exit 1; }
+    echo "    OK ($(du -h "$OUT3" | cut -f1))"
+else
+    echo "no ~/.var/app, skipping"
+fi
+
+notify-send -u low -t 4000 "Flatpak backup" "done: $(basename "$OUT" 2>/dev/null)" 2>/dev/null
+echo "Backup finished."

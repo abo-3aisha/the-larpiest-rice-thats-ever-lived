@@ -6,6 +6,8 @@ image/png=org.kde.gwenview.desktop;firefox.desktop;satty.desktop;gimp.desktop;im
 video/mp4=vlc.desktop;org.kde.haruna.desktop;mpv.desktop;fr.handbrake.ghb.desktop;
 image/jpeg=gimp.desktop;org.kde.gwenview.desktop;
 application/zip=org.gnome.FileRoller.desktop;
+audio/x-ms-wma=vlc.desktop;
+audio/vnd.wave=vlc.desktop;
 
 [Default Applications]
 application/x-ms-dos-executable=wine.desktop;
@@ -14,10 +16,12 @@ application/x-wine-extension-exe=wine.desktop;
 audio/mp4=vlc.desktop;
 audio/mpeg=vlc.desktop;
 image/png=org.kde.gwenview.desktop;
-inode/directory=thunar.desktop
+inode/directory=dolphin.desktop
 text/plain=org.gnome.TextEditor.desktop;
 video/mp4=vlc.desktop;
 x-scheme-handler/http=firefox.desktop;
 x-scheme-handler/https=firefox.desktop;
 image/jpeg=org.kde.gwenview.desktop
 application/zip=org.gnome.FileRoller.desktop
+audio/x-ms-wma=vlc.desktop
+audio/vnd.wave=vlc.desktop

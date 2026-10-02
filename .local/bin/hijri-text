@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+# hijri-text — one-shot Islamic (Hijri) date for the hyprlock label.
+# Same tabular algorithm as the verified desktop widget (anchors:
+# 1 Ramadan 1446 = 2025-03-01, 1 Ramadan 1447 = 2026-02-18).
+import math
+import sys
+from datetime import date
+
+MONTHS = ["Muharram", "Safar", "Rabi' I", "Rabi' II", "Jumada I", "Jumada II",
+          "Rajab", "Sha'ban", "Ramadan", "Shawwal", "Dhu l-Qa'da", "Dhu l-Hijja"]
+ISLAMIC_EPOCH = 1948440
+
+
+def gregorian_jdn(y, m, d):
+    a = (14 - m) // 12
+    y2 = y + 4800 - a
+    m2 = m + 12 * a - 3
+    return d + (153 * m2 + 2) // 5 + 365 * y2 + y2 // 4 - y2 // 100 + y2 // 400 - 32045
+
+
+def islamic_jdn(y, m, d):
+    return d + math.ceil(29.5 * (m - 1)) + (y - 1) * 354 + ((3 + 11 * y) // 30) \
+        + int(ISLAMIC_EPOCH) - 1
+
+
+def jdn_to_islamic(jd):
+    jd = math.floor(jd) + 0.5
+    year = math.floor((30 * (jd - ISLAMIC_EPOCH) + 10646) / 10631)
+    month = min(12, math.ceil((jd - (29 + islamic_jdn(year, 1, 1))) / 29.5) + 1)
+    day = int(jd - islamic_jdn(year, month, 1)) + 1
+    return day, month, year
+
+
+today = date.today()
+jd = gregorian_jdn(today.year, today.month, today.day)
+day, month, year = jdn_to_islamic(jd)
+print("%d %s %d" % (day, MONTHS[month - 1], year))

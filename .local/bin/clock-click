@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Clock click: toggle the now-panel (date + now-playing + Miku + cava EQ +
+# prayer lines). No notification — the prayer info lives inside the panel.
+exec /home/abo3aisha/.local/bin/nowtoggle

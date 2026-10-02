@@ -14,6 +14,14 @@ N() {
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Translate an OSD string. Loads the whole table once per key-press, so the
+# Fn row stays instant even though it is a shell script.
+T() {
+    local v
+    v=$(python3 "$HOME/.local/bin/i18n.py" get "$1" 2>/dev/null)
+    [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$1"
+}
+
 vol_pct()   { wpctl get-volume @DEFAULT_AUDIO_SINK@   2>/dev/null | awk '{printf "%d", $2*100}'; }
 vol_muted() { wpctl get-volume @DEFAULT_AUDIO_SINK@   2>/dev/null | grep -q MUTED; }
 src_muted() { wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null | grep -q MUTED; }
@@ -40,56 +48,56 @@ for k in ("mice", "touch", "tablets", "keyboards"):
 tp_apply() { # $1 = on|off
     local name
     name="$(tp_name)"
-    if [ -z "$name" ]; then N "Touchpad" "device not found"; return 1; fi
+    if [ -z "$name" ]; then N "$(T FN_TOUCHPAD)" "$(T FN_NOT_FOUND)"; return 1; fi
     if [ "$1" = off ]; then
         hyprctl keyword "device[$name]:enabled" "false" >/dev/null 2>&1
         : > "$HOME/.cache/fn-touchpad-off"
-        N "Touchpad off"
+        N "$(T FN_TOUCHPAD_OFF)"
     else
         hyprctl keyword "device[$name]:enabled" "true" >/dev/null 2>&1
         rm -f "$HOME/.cache/fn-touchpad-off"
-        N "Touchpad on"
+        N "$(T FN_TOUCHPAD_ON)"
     fi
 }
 
 case "${1:-}" in
     vol-up|vol-down)
-        have wpctl || { N "Volume" "wpctl not installed"; exit 0; }
+        have wpctl || { N "$(T FN_VOL_PCT)" "wpctl not installed"; exit 0; }
         if [ "$1" = vol-up ]; then
             wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+ >/dev/null 2>&1
         else
             wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- >/dev/null 2>&1
         fi
-        if vol_muted; then N "Volume $(vol_pct)%" "muted"; else N "Volume $(vol_pct)%"; fi
+        if vol_muted; then N "$(T FN_VOL_PCT) $(vol_pct)%" "$(T FN_MUTED)"; else N "$(T FN_VOL_PCT) $(vol_pct)%"; fi
         ;;
     vol-mute)
-        have wpctl || { N "Volume" "wpctl not installed"; exit 0; }
+        have wpctl || { N "$(T FN_VOL_PCT)" "wpctl not installed"; exit 0; }
         if vol_muted; then
             wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/dev/null 2>&1
-            N "Volume unmuted" "$(vol_pct)%"
+            N "$(T FN_VOL_UNMUTED) $(vol_pct)%"
         else
             wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 >/dev/null 2>&1
-            N "Volume muted"
+            N "$(T FN_VOL_MUTED)"
         fi
         ;;
     mic-mute)
-        have wpctl || { N "Microphone" "wpctl not installed"; exit 0; }
+        have wpctl || { N "$(T FN_MIC_PCT)" "wpctl not installed"; exit 0; }
         if src_muted; then
             wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0 >/dev/null 2>&1
-            N "Microphone unmuted"
+            N "$(T FN_MIC_UNMUTED)"
         else
             wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 1 >/dev/null 2>&1
-            N "Microphone muted"
+            N "$(T FN_MIC_MUTED)"
         fi
         ;;
     bright-up|bright-down)
-        have brightnessctl || { N "Brightness" "brightnessctl not installed"; exit 0; }
+        have brightnessctl || { N "$(T FN_BRIGHT_PCT)" "brightnessctl not installed"; exit 0; }
         if [ "$1" = bright-up ]; then
             brightnessctl set 5%+ >/dev/null 2>&1
         else
             brightnessctl set 5%- >/dev/null 2>&1
         fi
-        N "Brightness $(br_pct)%"
+        N "$(T FN_BRIGHT_PCT) $(br_pct)%"
         ;;
     touchpad)
         if [ -e "$HOME/.cache/fn-touchpad-off" ]; then tp_apply on; else tp_apply off; fi
@@ -100,21 +108,21 @@ case "${1:-}" in
         if have nmcli; then
             if [ "$(nmcli radio wifi 2>/dev/null)" = "enabled" ]; then
                 nmcli radio wifi off >/dev/null 2>&1
-                N "Airplane mode ON" "Wi-Fi off"
+                N "$(T FN_AIRPLANE) $(T FN_ON)" "$(T FN_WIFI_OFF)"
             else
                 nmcli radio wifi on >/dev/null 2>&1
-                N "Airplane mode OFF" "Wi-Fi on"
+                N "$(T FN_AIRPLANE) $(T FN_OFF)" "$(T FN_WIFI_ON)"
             fi
         elif have rfkill; then
             if rfkill list wlan 2>/dev/null | grep -q "Soft blocked: yes"; then
                 rfkill unblock wlan
-                N "Airplane mode OFF" "Wi-Fi on"
+                N "$(T FN_AIRPLANE) $(T FN_OFF)" "$(T FN_WIFI_ON)"
             else
                 rfkill block wlan
-                N "Airplane mode ON" "Wi-Fi off"
+                N "$(T FN_AIRPLANE) $(T FN_ON)" "$(T FN_WIFI_OFF)"
             fi
         else
-            N "Airplane mode" "no nmcli/rfkill"
+            N "$(T FN_AIRPLANE)" "$(T FN_MISSING)"
         fi
         ;;
     display)
@@ -122,9 +130,9 @@ case "${1:-}" in
         ;;
     kbd-up|kbd-down)
         if [ "$1" = kbd-up ]; then
-            if kbd_ok; then brightnessctl -d '*kbd*' set 10%+ >/dev/null 2>&1; N "Keyboard backlight" "$(kbd_pct)%"; else N "Keyboard backlight" "Brightness increased"; fi
+            if kbd_ok; then brightnessctl -d '*kbd*' set 10%+ >/dev/null 2>&1; N "$(T FN_KBD_PCT) $(kbd_pct)%"; else N "$(T FN_KBD_PCT)" "$(T FN_KBD_UP)"; fi
         elif [ "$1" = kbd-down ]; then
-            if kbd_ok; then brightnessctl -d '*kbd*' set 10%- >/dev/null 2>&1; N "Keyboard backlight" "$(kbd_pct)%"; else N "Keyboard backlight" "Brightness decreased"; fi
+            if kbd_ok; then brightnessctl -d '*kbd*' set 10%- >/dev/null 2>&1; N "$(T FN_KBD_PCT) $(kbd_pct)%"; else N "$(T FN_KBD_PCT)" "$(T FN_KBD_DOWN)"; fi
         fi
         ;;
     kbd-toggle)
@@ -133,21 +141,21 @@ case "${1:-}" in
             if [ "${cur:-0}" -gt 0 ] 2>/dev/null; then
                 brightnessctl -d '*kbd*' get > "$HOME/.cache/fn-kbd-last" 2>/dev/null
                 brightnessctl -d '*kbd*' set 0 >/dev/null 2>&1
-                N "Keyboard backlight off"
+                N "$(T FN_KBD_OFF)"
             else
                 last="$(cat "$HOME/.cache/fn-kbd-last" 2>/dev/null || echo 1)"
                 brightnessctl -d '*kbd*' set "$last" >/dev/null 2>&1
-                N "Keyboard backlight on"
+                N "$(T FN_KBD_ON)"
             fi
         else
-            N "Keyboard backlight" "firmware controlled"
+            N "$(T FN_KBD_PCT)" "$(T FN_KBD_FW)"
         fi
         ;;
     sleep)
-        have systemctl && systemctl suspend || N "Sleep" "systemctl not found"
+        have systemctl && systemctl suspend || N "$(T FN_SLEEP)" "systemctl not found"
         ;;
     *)
-        N "Fn key" "unknown action: ${1:-}"
+        N "$(T FN_UNKNOWN)" "${1:-}"
         ;;
 esac
 exit 0

@@ -1,0 +1,792 @@
+#!/usr/bin/env python3
+"""language-and-time — Language & Time settings (SUPER+S → Language and Time).
+
+One window, keyboard-first (same feel as screen-rec-gui):
+  Up/Down      move between rows
+  Right/Left   cycle that row's value
+  Enter        act on the focused row (add / remove an input language)
+  Esc          cancel
+
+Everything is stored in ~/.config/rice/i18n.conf and applied live:
+  * interface language  → every translatable surface reloads
+  * time zone          → timedatectl (best effort) + our own renderer
+  * clock/date format  → waybar clock, widgets, hyprlock labels
+  * input languages    → hyprctl keyword + both Hyprland config files
+  * toggle shortcut    → kb_options grp:* rule
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+import warnings
+
+warnings.filterwarnings("ignore", module="gi")
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+HOME = os.path.expanduser("~")
+BIN = os.path.join(HOME, ".local/bin")
+CONF = os.path.join(HOME, ".config/rice/i18n.conf")
+THEME = os.path.join(HOME, ".config/hypr/theme.lua")
+HYPR_LUA = os.path.join(HOME, ".config/hypr/hyprland.lua")
+HYPR_CONF = os.path.join(HOME, ".config/hypr/hyprland.conf")
+# hyprland-gui.lua is loaded AFTER hyprland.lua and used to hardcode
+# kb_layout="us,ara", which wiped the list on every reload. It no longer sets
+# them, but the values are still written here so a future GUI regen that puts
+# them back gets corrected instead of silently overriding.
+HYPR_GUI = os.path.join(HOME, ".config/hypr/hyprland-gui.lua")
+
+sys.path.insert(0, BIN)
+import i18n  # noqa: E402  (our own engine, same folder)
+
+
+# --------------------------------------------------------------- options --
+TZONES = [
+    "Asia/Damascus", "Asia/Baghdad", "Asia/Amman", "Asia/Beirut", "Asia/Jerusalem",
+    "Asia/Riyadh", "Asia/Qatar", "Asia/Kuwait", "Asia/Dubai", "Asia/Karachi",
+    "Asia/Kolkata", "Asia/Dhaka", "Asia/Bangkok", "Asia/Shanghai", "Asia/Tokyo",
+    "Asia/Seoul", "Asia/Manila", "Asia/Jakarta", "Europe/Istanbul", "Europe/Moscow",
+    "Europe/Berlin", "Europe/Paris", "Europe/Madrid", "Europe/Rome", "Europe/Lisbon",
+    "Europe/Amsterdam", "Europe/Brussels", "Europe/Vienna", "Europe/Zurich",
+    "Europe/Stockholm", "Europe/Oslo", "Europe/Warsaw", "Europe/Prague",
+    "Europe/Athens", "Europe/Kyiv", "Europe/London", "Europe/Dublin",
+    "Atlantic/Reykjavik", "America/New_York", "America/Chicago", "America/Denver",
+    "America/Los_Angeles", "America/Toronto", "America/Mexico_City",
+    "America/Bogota", "America/Sao_Paulo", "America/Argentina/Buenos_Aires",
+    "Africa/Cairo", "Africa/Casablanca", "Africa/Algiers", "Africa/Nairobi",
+    "Australia/Sydney", "Pacific/Auckland", "UTC",
+]
+
+CLOCKS = [("%I:%M %p", "CLOCK_12H"), ("%H:%M", "CLOCK_24H"),
+          ("%I:%M:%S %p", "CLOCK_12HS"), ("%H:%M:%S", "CLOCK_24HS")]
+
+DATES = ["%a, %b %d", "%A, %B %d", "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d %B %Y"]
+
+TOGGLES = [
+    ("grp:alt_shift_toggle", "TGL_ALT_SHIFT"),
+    ("grp:ralt_toggle", "TGL_RALT"),
+    ("grp:lalt_toggle", "TGL_LALT"),
+    ("grp:win_space_toggle", "TGL_SUPER_SPACE"),
+    ("grp:caps_toggle", "TGL_CAPS"),
+    ("grp:rcaps_toggle", "TGL_RCAPS"),
+    ("grp:ctrl_shift_toggle", "TGL_CTRL_SHIFT"),
+    ("grp:shift_toggle", "TGL_SHIFT"),
+    ("grp:toggle", "TGL_ANY"),
+]
+
+LAYOUTS = [
+    ("us", "LAY_us"), ("gb", "LAY_gb"), ("ara", "LAY_ara"), ("fr", "LAY_fr"),
+    ("es", "LAY_es"), ("de", "LAY_de"), ("it", "LAY_it"), ("nl", "LAY_nl"),
+    ("pt", "LAY_pt"), ("br", "LAY_br"), ("pl", "LAY_pl"), ("se", "LAY_sv"),
+    ("tr", "LAY_tr"), ("ru", "LAY_ru"), ("ir", "LAY_fa"), ("pk", "LAY_ur"),
+    ("il", "LAY_he"), ("in", "LAY_in"), ("cn", "LAY_cn"), ("jp", "LAY_jp"),
+    ("kr", "LAY_kr"),
+]
+
+DEFAULTS = {
+    "LANG": "en", "TZ": "Asia/Damascus", "CLOCK": "%I:%M %p",
+    "DATE": "%a, %b %d", "SECONDS": "0", "WEEK_START": "6",
+    "INPUT": "us,ara", "TOGGLE": "grp:alt_shift_toggle",
+}
+
+
+# ----------------------------------------------------------------- conf --
+def load():
+    d = dict(DEFAULTS)
+    if os.path.exists(CONF):
+        for line in open(CONF, encoding="utf-8"):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                v = v.strip().strip('"')
+                d[k.strip()] = v
+    return d
+
+
+# XKB defaults that are NOT what a normal user expects. "es" alone resolves to
+# Spanish *Dvorak* and "de"/"fr" to nodeadkeys layouts, which is why a layout
+# could look switched in the waybar but type nothing like the language.
+VARIANTS = {
+    "fr": "azerty",      # XKB default for fr is "olpc" (a netbook layout)
+    "cn": "altgr-pinyin",  # XKB default for cn is "tib" (Tibetan!)
+}
+
+
+# These do not type their language from the layout alone: an input method has to
+# be installed (fcitx5 / ibus) to compose the characters. A layout only puts the
+# right keys there.
+IME_REQUIRED = {"cn", "in", "jp", "kr"}
+
+
+def layout_spec(code):
+    """Hyprland layout token, with the variant spelled out when it matters."""
+    v = VARIANTS.get(code, None)
+    if v is None:
+        return code
+    return "%s(%s)" % (code, v) if v else "%s()" % code
+
+
+def layout_list(codes):
+    return ",".join(layout_spec(c) for c in codes if c)
+
+
+def save_lang_only(lang):
+    """Persist only LANG, leaving every other key untouched.
+
+    Used for the live language switch so the window can re-render immediately
+    without committing timezone / input / clock changes.
+    """
+    try:
+        d = i18n.conf()
+        d["LANG"] = lang
+        save(d)
+    except Exception:
+        pass
+
+
+def save(d):
+    tmp = CONF + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write("# rice: language & time — written by language-and-time\n")
+        for k in ("LANG", "TZ", "CLOCK", "DATE", "WEEK_START", "INPUT", "TOGGLE"):
+            fh.write('%s="%s"\n' % (k, d[k]))
+    os.replace(tmp, CONF)
+
+
+def theme_accent():
+    try:
+        m = re.search(r'accent\s*=\s*"([0-9a-fA-F]{6})"', open(THEME).read())
+        return "#" + m.group(1)
+    except Exception:
+        return "#d8a028"
+
+
+def notify(text):
+    subprocess.run(["notify-send", "-a", "Rice", "-t", "2600", text],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def run(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True).returncode
+
+
+def run_out(cmd):
+    """Run and return stdout, or "" if it failed. run() only gives a code."""
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def layout_name(code):
+    for c, key in LAYOUTS:
+        if c == code:
+            return i18n.t(key)
+    return code
+
+
+# ------------------------------------------------------------------ guard --
+# A GTK app that dies during build() shows NOTHING on screen, which is how a
+# typo in a widget method turns into "the app doesn't open". Log the traceback
+# where it can be read instead of losing it in a dead terminal.
+LOG = os.path.expanduser("~/.cache/rice-gui-error.log")
+
+
+def _log_fail(where, exc):
+    import traceback
+    tb = traceback.format_exc()
+    try:
+        with open(LOG, "a", encoding="utf-8") as fh:
+            fh.write("\n=== %s @ %s ===\n%s" % (where, where, tb))
+    except OSError:
+        pass
+    try:
+        d = Gtk.MessageDialog(
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.CLOSE,
+            text=i18n.t("LT_START_FAIL"))
+        d.format_secondary_text("%s: %s\n\nLogged to %s" % (type(exc).__name__, exc, LOG))
+        d.run()
+        d.destroy()
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------ app --
+class App:
+    def __init__(self):
+        self.d = load()
+        self.rows = []          # (row_index, value_label, kind)
+        self.langs = i18n.available()
+        self.win = None
+        self.build()
+
+    # ---------------------------------------------------------- building --
+    def T(self, key):
+        return i18n.t(key)
+
+    def _maybe_quit(self):
+        if not getattr(self, "_rebuilding", False):
+            Gtk.main_quit()
+
+    def sync_tgl_hint(self):
+        n = len([x for x in getattr(self, "d", {}).get("INPUT", "").split(",") if x])
+        if hasattr(self, "tgl_hint"):
+            self.tgl_hint.set_visible(n < 2)
+
+    def build(self):
+        rtl = i18n.t("RTL") == "1"
+        self.rtl = rtl
+
+        self.win = Gtk.Window()
+        self.win.set_title(self.T("LT_TITLE"))
+        self.win.set_default_size(520, 430)
+        self.win.set_resizable(False)
+        self.win.set_position(Gtk.WindowPosition.CENTER)
+        self.win.connect("key-press-event", self.on_key)
+        self._rebuilding = False
+        # Only a REAL close ends the loop. The language switch destroys and
+        # rebuilds this same window, and an unconditional main_quit() there
+        # closed the whole app the moment you pressed left/right.
+        self.win.connect("destroy", lambda *_: self._maybe_quit())
+
+        acc = theme_accent()
+        css = Gtk.CssProvider()
+        css.load_from_data(("""
+        window { background: #161617; }
+        label.title { font-size: 17px; color: %s; font-weight: bold; }
+        label.head { font-size: 12px; color: #6f727a; padding-top: 10px; }
+        label.name { color: #8a8d95; font-size: 13px; padding: 3px 6px; }
+        label.val { color: #ebde98; font-size: 14px; font-weight: bold; padding: 3px 10px; }
+        label.sel { background: %s; color: #101012; border-radius: 6px; }
+        label.hint { font-size: 11px; color: #6f727a; }
+        label.item { color: #d7d7dc; font-size: 13px; padding: 3px 8px; }
+        label.itemsel { background: %s; color: #101012; border-radius: 6px; }
+        button { color: #ebde98; background: #232326; border: 1px solid #33333a;
+                 padding: 5px 12px; }
+        button:hover { border-color: %s; }
+        listbox { background: #1d1d20; border: 1px solid #2c2c32; border-radius: 8px; }
+        listbox row { padding: 2px; }
+        entry { background: #232326; color: #ebde98; border: 1px solid #33333a; }
+        combo { color: #ebde98; }
+        """).replace("%s", acc).encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
+        root.set_margin_top(18)
+        root.set_margin_bottom(14)
+        if rtl:
+            root.set_direction(Gtk.TextDirection.RTL)
+        self.win.add(root)
+
+        title = Gtk.Label(label=self.T("LT_TITLE"), xalign=0.0)
+        title.get_style_context().add_class("title")
+        root.add(title)
+
+        # ---- section: language + time
+        h1 = Gtk.Label(label=self.T("LT_LANGUAGE"), xalign=0.0)
+        h1.get_style_context().add_class("head")
+        root.add(h1)
+
+        grid = Gtk.Grid(column_spacing=14, row_spacing=5)
+        root.add(grid)
+        self.rows = []
+        self.add_row(grid, 0, "LT_LANGUAGE", "lang")
+        self.add_row(grid, 1, "LT_TIMEZONE", "tz")
+        self.add_row(grid, 2, "LT_TIME_FORMAT", "clock")
+        self.add_row(grid, 3, "LT_DATE_FORMAT", "date")
+        self.add_row(grid, 4, "LT_WEEK_START", "week")
+
+        root.pack_start(Gtk.Separator(), True, True, 0)
+
+        # ---- section 1: the language of the SYSTEM (menus, apps, dates)
+        h1 = Gtk.Label(label=self.T("LT_SECT_SYS"), xalign=0.0)
+        h1.get_style_context().add_class("head")
+        root.add(h1)
+
+        # ---- section 2: the languages you TYPE in on the keyboard
+        h2 = Gtk.Label(label=self.T("LT_SECT_INPUT"), xalign=0.0)
+        h2.get_style_context().add_class("head")
+        root.add(h2)
+        ih = Gtk.Label(label=self.T("LT_SECT_INPUT_HINT"), xalign=0.0)
+        ih.set_line_wrap(True)
+        ih.get_style_context().add_class("hint")
+        root.add(ih)
+
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.set_can_focus(False)
+        self.fill_list()
+        sc = Gtk.ScrolledWindow()
+        sc.set_min_content_height(96)
+        sc.set_max_content_height(110)
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sc.add(self.listbox)
+        root.add(sc)
+        self.na_lbl = Gtk.Label(label=self.T("LT_NA"), xalign=0.5)
+        self.na_lbl.get_style_context().add_class("hint")
+        root.add(self.na_lbl)
+
+        rowb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for txt, fn in ((self.T("LT_ADD"), self.on_add),
+                        (self.T("LT_REMOVE"), self.on_del),
+                        (self.T("LT_MOVE_UP"), lambda *_: self.move(-1)),
+                        (self.T("LT_MOVE_DOWN"), lambda *_: self.move(1)),
+                        (self.T("LT_RESET_INPUT"), self.on_reset_input)):
+            b = Gtk.Button(label=txt)
+            b.connect("clicked", fn)
+            rowb.pack_start(b, True, True, 0)
+        root.add(rowb)
+
+        grid2 = Gtk.Grid(column_spacing=14, row_spacing=5)
+        root.add(grid2)
+        self.add_row(grid2, 0, "LT_TOGGLE", "toggle")
+        self.tgl_hint = Gtk.Label(label=self.T("LT_TOGGLE_OFF"), xalign=0.0)
+        self.tgl_hint.set_line_wrap(True)
+        self.tgl_hint.get_style_context().add_class("hint")
+        root.add(self.tgl_hint)
+        self.sync_tgl_hint()
+
+        root.pack_start(Gtk.Separator(), True, True, 0)
+
+        hint = Gtk.Label(label=self.T("LT_HINT"), xalign=0.0)
+        hint.get_style_context().add_class("hint")
+        root.add(hint)
+
+        btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btns.set_halign(Gtk.Align.END)
+        ap = Gtk.Button(label=self.T("LT_APPLY"))
+        ap.get_style_context().add_class("suggested-action")
+        ap.connect("clicked", lambda *_: self.apply())
+        gb = Gtk.Button(label=self.T("LT_GENLOCALE"))
+        gb.set_tooltip_text(self.T("LT_GENLOCALE_TIP"))
+        gb.connect("clicked", lambda *_: self.gen_locale())
+        cc = Gtk.Button(label=self.T("LT_CANCEL"))
+        cc.connect("clicked", lambda *_: self.win.destroy())
+        btns.pack_start(gb, False, False, 0)
+        btns.pack_end(ap, False, False, 0)
+        btns.pack_end(cc, False, False, 0)
+        root.add(btns)
+
+        self.sel = 0
+        self.paint()
+        self.win.show_all()
+        self.win.present()
+
+    def add_row(self, grid, r, key, kind):
+        if grid is None:
+            return
+        name = Gtk.Label(label=self.T(key), xalign=0.0)
+        name.get_style_context().add_class("name")
+        name.set_size_request(150, -1)
+        val = Gtk.Label(label="", xalign=0.0)
+        val.get_style_context().add_class("val")
+        grid.attach(name, 0, r, 1, 1)
+        grid.attach(val, 1, r, 1, 1)
+        self.rows.append((kind, name, val))
+
+    def fill_list(self):
+        for c in list(self.listbox):
+            self.listbox.remove(c)
+        for code in [x for x in self.d["INPUT"].split(",") if x]:
+            lbl_txt = "%s  —  %s" % (layout_name(code), layout_spec(code))
+            if code in IME_REQUIRED:
+                lbl_txt += "   ·   " + i18n.t("IME_NEEDED")
+            l = Gtk.Label(label=lbl_txt, xalign=0.0)
+            l.get_style_context().add_class("item")
+            r = Gtk.ListBoxRow()
+            r.add(l)
+            r.code = code
+            self.listbox.add(r)
+        self.listbox.show_all()
+        rows = self.listbox.get_children()
+        if rows:
+            self.listbox.select_row(rows[0])
+        na = getattr(self, "na_lbl", None)
+        if na is not None:
+            na.set_visible(not rows)
+
+    # ------------------------------------------------------------ values --
+    def value(self, kind):
+        d = self.d
+        if kind == "lang":
+            return i18n.t("NAME")
+        if kind == "tz":
+            return d["TZ"].replace("_", " ")
+        if kind == "clock":
+            for f, n in CLOCKS:
+                if f == d["CLOCK"]:
+                    return "%s  ·  %s" % (i18n.t(n), i18n.render(f))
+            return d["CLOCK"]
+        if kind == "date":
+            return i18n.render(d["DATE"])
+        if kind == "week":
+            keys = ["DAY_0", "DAY_1", "DAY_2", "DAY_3", "DAY_4", "DAY_5", "DAY_6"]
+            return i18n.t(keys[int(d["WEEK_START"]) % 7])
+        if kind == "toggle":
+            for v, key in TOGGLES:
+                if v == d["TOGGLE"]:
+                    return i18n.t(key)
+            return d["TOGGLE"]
+        return ""
+
+    def options(self, kind):
+        if kind == "lang":
+            return self.langs
+        if kind == "tz":
+            return TZONES
+        if kind == "clock":
+            return [c[0] for c in CLOCKS]
+        if kind == "date":
+            return DATES
+        if kind == "week":
+            return [str(i) for i in range(7)]
+        if kind == "toggle":
+            return [t[0] for t in TOGGLES]
+        return []
+
+    def current(self, kind):
+        if kind == "lang":
+            return self.d["LANG"]
+        if kind == "week":
+            return str(int(self.d["WEEK_START"]) % 7)
+        return self.d.get({"clock": "CLOCK", "date": "DATE",
+                           "tz": "TZ", "toggle": "TOGGLE"}[kind])
+
+    def cycle(self, kind, delta):
+        opts = self.options(kind)
+        cur = self.current(kind)
+        try:
+            i = opts.index(cur)
+        except ValueError:
+            i = 0
+        nv = opts[(i + delta) % len(opts)]
+        if kind == "lang":
+            self.d["LANG"] = nv
+        elif kind == "week":
+            self.d["WEEK_START"] = nv
+        elif kind == "clock":
+            self.d["CLOCK"] = nv
+        elif kind == "date":
+            self.d["DATE"] = nv
+        elif kind == "tz":
+            self.d["TZ"] = nv
+        elif kind == "toggle":
+            self.d["TOGGLE"] = nv
+        if kind == "lang":
+            # Persist LANG FIRST: the i18n engine reads the file on every lookup,
+            # so rebuilding before the write redrew the window in the OLD
+            # language and the switch only appeared to work after Apply.
+            save_lang_only(self.d["LANG"])
+            self._rebuilding = True
+            self.win.destroy()
+            self._rebuilding = False
+            self.win = None
+            self.build()
+            return
+        self.paint()
+
+    def paint(self):
+        for i, (kind, name, val) in enumerate(self.rows):
+            val.set_text(self.value(kind))
+            for lbl in (name, val):
+                lbl.get_style_context().remove_class("sel")
+            if i == self.sel:
+                for lbl in (name, val):
+                    lbl.get_style_context().add_class("sel")
+
+    # ------------------------------------------------------------- input --
+    def sel_code(self):
+        r = self.listbox.get_selected_row()
+        return r.code if r else None
+
+    def on_add(self, *_):
+        """Show a picker of every available layout — never add one at random."""
+        code = self.pick_layout()
+        if not code:
+            return
+        order = [x for x in self.d["INPUT"].split(",") if x]
+        if code in order:
+            return
+        order.append(code)
+        self.d["INPUT"] = ",".join(order)
+        self.fill_list()
+        self.sync_tgl_hint()
+        for r in self.listbox.get_children():
+            if getattr(r, "code", None) == code:
+                self.listbox.select_row(r)
+        notify(i18n.t("LT_ADDED").format(lang=i18n.t(dict(LAYOUTS)[code])))
+
+    def on_reset_input(self, *_):
+        self.d["INPUT"] = "us,ara"
+        self.fill_list()
+        self.sync_tgl_hint()
+        notify(i18n.t("LT_RESET_INPUT"))
+
+    def pick_layout(self):
+        """Modal chooser over all LAYOUTS. Returns the code, or None."""
+        used = {x for x in self.d["INPUT"].split(",") if x}
+        dlg = Gtk.Dialog(title=i18n.t("LT_PICK_TITLE"), parent=self.win, modal=True)
+        dlg.add_buttons(i18n.t("LT_APPLY"), Gtk.ResponseType.OK,
+                        i18n.t("LT_CANCEL"), Gtk.ResponseType.CANCEL)
+        box = dlg.get_content_area()
+        box.set_spacing(6)
+        box.set_border_width(10)
+
+        lst = Gtk.ListBox()
+        lst.set_can_focus(True)
+        first = None
+        for code, key in LAYOUTS:
+            row = Gtk.ListBoxRow()
+            row.code = code
+            row.acc = key
+            name = i18n.t(key)
+            if code in used:
+                name += "   ·   " + i18n.t("LT_IN_USE")
+            if code in IME_REQUIRED:
+                name += "   ·   " + i18n.t("IME_NEEDED")
+            lbl = Gtk.Label(label=name, xalign=0.0)
+            lbl.set_margin_top(4)
+            lbl.set_margin_bottom(4)
+            lbl.set_margin_start(8)
+            lbl.set_margin_end(8)
+            row.add(lbl)
+            lst.add(row)
+            if code not in used and first is None:
+                first = row
+        if first is not None:
+            lst.select_row(first)
+        lst.connect("row-activated", lambda _l, r: dlg.response(Gtk.ResponseType.OK))
+
+        hint = Gtk.Label(label=i18n.t("LT_PICK_HINT"))
+        hint.get_style_context().add_class("hint")
+        box.pack_start(hint, False, False, 0)
+        sc = Gtk.ScrolledWindow()
+        sc.set_min_content_height(320)
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sc.add(lst)
+        box.pack_start(sc, True, True, 0)
+
+        dlg.show_all()
+        if first is not None:
+            grp = first.get_parent()
+            if grp is not None:
+                grp.select_row(first)
+
+        picked = None
+        while True:
+            resp = dlg.run()
+            if resp != Gtk.ResponseType.OK:
+                break
+            r = lst.get_selected_row()
+            if r is not None and r.code not in used:
+                picked = r.code
+                break
+            dlg.hide()
+        dlg.destroy()
+        return picked
+
+    def on_del(self, *_):
+        code = self.sel_code()
+        if not code:
+            return
+        keep = [x for x in self.d["INPUT"].split(",") if x and x != code]
+        if not keep:
+            notify(i18n.t("LT_LAYOUT_KEEP"))
+            return
+        self.d["INPUT"] = ",".join(keep)
+        self.fill_list()
+        self.sync_tgl_hint()
+        notify(i18n.t("LT_REMOVED").format(lang=i18n.t(dict(LAYOUTS)[code])))
+
+    def move(self, delta):
+        order = [x for x in self.d["INPUT"].split(",") if x]
+        code = self.sel_code()
+        if not code or code not in order:
+            return
+        i = order.index(code)
+        j = (i + delta) % len(order)
+        order[i], order[j] = order[j], order[i]
+        self.d["INPUT"] = ",".join(order)
+        self.fill_list()
+        for r in self.listbox.get_children():
+            if r.code == code:
+                self.listbox.select_row(r)
+                break
+
+    # ------------------------------------------------------------- keys --
+    def on_key(self, _w, ev):
+        k = ev.keyval
+        if k in (Gdk.KEY_Down, Gdk.KEY_Tab):
+            self.sel = (self.sel + 1) % len(self.rows)
+            self.paint()
+            return True
+        if k in (Gdk.KEY_Up, Gdk.KEY_ISO_Left_Tab):
+            self.sel = (self.sel - 1) % len(self.rows)
+            self.paint()
+            return True
+        if k in (Gdk.KEY_Right, Gdk.KEY_plus):
+            self.cycle(self.rows[self.sel][0], 1)
+            return True
+        if k in (Gdk.KEY_Left, Gdk.KEY_minus):
+            self.cycle(self.rows[self.sel][0], -1)
+            return True
+        if k in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self.on_add()
+            return True
+        if k == Gdk.KEY_Delete:
+            self.on_del()
+            return True
+        if k == Gdk.KEY_Escape:
+            self.win.destroy()
+            return True
+        return False
+
+    # ------------------------------------------------------- locale-gen --
+    def _locale_present(self, loc):
+        try:
+            out = subprocess.run(["locale", "-a"], capture_output=True,
+                                 text=True, timeout=5).stdout.lower()
+        except Exception:
+            return False
+        base = loc.replace("-", "_")
+        if base in out or (base + ".utf8") in out:
+            return True
+        base = base.split(".")[0]
+        return (base in out) or (base + ".utf8") in out
+
+    def gen_locale(self):
+        """Generate the system locale for the SELECTED language.
+
+        Only one language can be the system locale at a time, and the ones the
+        four tables map to are not all present (fr_FR/es_ES are missing on a
+        fresh install), which is why switching the interface language alone
+        left GTK apps in English. Skips the password prompt when the locale is
+        already there, and says so instead of appearing to do nothing.
+        """
+        loc = i18n.locale_code()
+        if not loc:
+            return
+        if self._locale_present(loc):
+            notify(self.T("LT_LOC_OK").format(loc=loc))
+            return
+        script = ("grep -q '^%s UTF-8' /etc/locale.gen || "
+                  "echo '%s UTF-8' >> /etc/locale.gen; locale-gen" % (loc, loc))
+        if not shutil.which("pkexec"):
+            notify(self.T("LT_LOC_NOPOLKIT"))
+            return
+        try:
+            subprocess.Popen(["pkexec", "sh", "-c", script])
+            notify(self.T("LT_GENLOCALE_ASK"))
+        except FileNotFoundError:
+            notify(self.T("LT_GENLOCALE_NOPK"))
+
+    # ------------------------------------------------------------ apply --
+    def apply(self):
+        save(self.d)
+
+        # 1. time zone — system-wide if permitted, our renderer always local
+        rc = run("timedatectl set-timezone %s" % self.d["TZ"])
+        tzmsg = self.d["TZ"] if rc == 0 else "%s (local only)" % self.d["TZ"]
+
+        # 3. input layouts — live + persisted in both Hyprland files.
+        #    The keywords are fully qualified (input:kb_layout) because a bare
+        #    name is not resolved by every Hyprland build and fails silently,
+        #    which is why added languages used to vanish on the next reload.
+        lay = layout_list(self.d["INPUT"].split(","))
+        wrote = 0
+        for path in (HYPR_LUA, HYPR_CONF, HYPR_GUI):
+            if not os.path.exists(path):
+                continue
+            try:
+                s = open(path, encoding="utf-8").read()
+                s2 = re.sub(r'(kb_layout\s*=\s*")[^"]*(")',
+                            lambda m: m.group(1) + lay + m.group(2), s)
+                s2 = re.sub(r'(kb_options\s*=\s*")[^"]*(")',
+                            lambda m: m.group(1) + self.d["TOGGLE"] + m.group(2), s2)
+                if s2 != s:
+                    open(path, "w", encoding="utf-8").write(s2)
+                    wrote += 1
+            except OSError:
+                pass
+        # read back what the file really says, so a silent failure is visible
+        live = ""
+        for path in (HYPR_LUA, HYPR_CONF):
+            if not os.path.exists(path):
+                continue
+            try:
+                m = re.search(r'kb_layout\s*=\s*"([^"]*)"',
+                              open(path, encoding="utf-8").read())
+                if m:
+                    live = m.group(1)
+                    break
+            except OSError:
+                pass
+        if live != lay:
+            notify("%s: %s -> %s" % (i18n.t("LT_SECT_INPUT"), lay or "?", live or "?"))
+
+        loc = i18n.locale_code() or "en_US.UTF-8"
+        # 2b. system language — environment.d for the next login, plus the
+        #     live user manager so the running session picks it up now.
+        os.makedirs(os.path.expanduser("~/.config/environment.d"), exist_ok=True)
+        with open(os.path.expanduser("~/.config/environment.d/10-rice-locale.conf"),
+                  "w", encoding="utf-8") as fh:
+            fh.write('LANG=%s\n' % loc)
+            fh.write('LANGUAGE=%s\n' % loc.split("_")[0])
+            fh.write('LC_TIME=%s\n' % loc)
+        run("systemctl --user import-environment LANG LANGUAGE LC_TIME")
+
+        # 4. reload every surface that renders text.
+        #    The keyboard keywords are applied AFTER this on purpose: a reload
+        #    resets the ACTIVE layout index to 0, so setting it before the
+        #    reload silently threw the user back to the first language.
+        run("hyprctl reload")
+        run("hyprctl keyword input:kb_layout '%s'" % lay)
+        run("hyprctl keyword input:kb_options '%s'" % self.d["TOGGLE"])
+        # Read back what Hyprland really accepted. A layout it cannot parse is
+        # dropped silently, which used to look like "the language was added but
+        # typing stays English" with no way to tell why.
+        got = ""
+        r = run_out("hyprctl -j getoption input:kb_layout")
+        if r and r.strip() not in ("[]", "{}", '""'):
+            m = re.search(r'"str"\s*:\s*"([^"]*)"', r) or re.search(r'"value"\s*:\s*"([^"]*)"', r)
+            got = m.group(1) if m else r.strip().strip('"')
+        # Only worth a second notification when Hyprland actually disagreed
+        # with what we asked for: that is the case that used to look like
+        # "the language was added but typing stays English".
+        if got and got.replace(" ", "") != lay.replace(" ", ""):
+            notify("%s: %s -> %s" % (i18n.t("LT_SECT_INPUT"), lay, got))
+        for cmd in ("swaync-client -R", "swaync-client -rs",
+                    "%s/widgets-apply --force-restart" % BIN):
+            run(cmd + " >/dev/null 2>&1 &")
+        # Reload the bar that is already running instead of starting another
+        # one: SIGUSR2 makes waybar re-read its config in place, and spawning
+        # waybar & as well left two bars stacked on top of each other.
+        if subprocess.run(["pgrep", "-x", "waybar"],
+                          capture_output=True).returncode == 0:
+            run("pkill -SIGUSR2 -x waybar")
+        else:
+            run("setsid waybar >/dev/null 2>&1 < /dev/null &")
+
+        self._rebuilding = False
+        self.win.destroy()
+        shown = got or lay
+        notify("%s · %s · %s · %s %s" % (i18n.t("LT_APPLY"), i18n.t("NAME"), tzmsg,
+                                          i18n.t("LT_SECT_INPUT"), shown))
+        Gtk.main_quit()
+
+
+if __name__ == "__main__":
+    try:
+        App()
+        Gtk.main()
+    except BaseException as exc:
+        _log_fail("startup", exc)
+        sys.exit(1)

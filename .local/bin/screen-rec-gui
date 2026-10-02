@@ -104,8 +104,19 @@ def parse_bitrate_mbps(s):
         return 8
 
 
+def _T(key):
+    """Look a string up in the active language table (no fallback, no mixing)."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import i18n
+        return i18n.t(key)
+    except Exception:
+        return key
+
+
 class RecGui:
     def __init__(self):
+        self.T = _T
         self.d = load_conf()
         self.idx = 0
         self.rows = []  # (name_label, value_widget, kind, current_value)
@@ -145,7 +156,7 @@ class RecGui:
         box.set_margin_bottom(14)
         self.win.add(box)
 
-        title = Gtk.Label(label="Recording Options")
+        title = Gtk.Label(label=self.T("SR_TITLE"))
         title.get_style_context().add_class("title")
         box.add(title)
 
@@ -174,7 +185,7 @@ class RecGui:
 
         # Bitrate — mouse slider
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        name = Gtk.Label(label="Bitrate", xalign=0.0)
+        name = Gtk.Label(label=self.T("SR_BITRATE"), xalign=0.0)
         name.get_style_context().add_class("name")
         name.set_size_request(80, -1)
         self.bit_label = Gtk.Label(label="", xalign=0.0)
@@ -198,9 +209,9 @@ class RecGui:
 
         btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         btns.set_halign(Gtk.Align.END)
-        save = Gtk.Button(label="Save")
+        save = Gtk.Button(label=self.T("SR_SAVE"))
         save.connect("clicked", lambda *_: self._save())
-        cancel = Gtk.Button(label="Cancel")
+        cancel = Gtk.Button(label=self.T("SR_CANCEL"))
         cancel.connect("clicked", lambda *_: self.win.destroy())
         btns.pack_end(save, False, False, 0)
         btns.pack_end(cancel, False, False, 0)
@@ -303,15 +314,15 @@ class RecGui:
     def _apply_record(self, was_active):
         if not was_active:
             return
-        notify = ["notify-send", "-a", "Screen record", "-i", "media-record"]
+        notify = ["notify-send", "-a", self.T("APP_SCREEN_REC"), "-i", "media-record"]
         subprocess.Popen([REC])          # toggle OFF the live recording
         for _ in range(50):              # wait until it fully stopped
             if not rec_active():
                 break
             time.sleep(0.2)
         if rec_active():
-            subprocess.Popen(notify + ["Could not restart recording",
-                                       "Old session kept running — new settings will apply on next start"])
+            subprocess.Popen(notify + [self.T("SR_NO_RESTART"),
+                                       self.T("SR_OLD_KEPT")])
             return
         subprocess.Popen([REC])          # toggle ON with the freshly saved conf
 
@@ -320,9 +331,10 @@ class RecGui:
         was_active = rec_active()
         self.d["BITRATE"] = mbps_to_bitrate_str(m)
         save_conf(self.d)
-        subprocess.Popen(["notify-send", "-a", "Screen record", "-i", "media-record",
-                          "Recording options saved",
-                          f"{self.d['CODEC']} · {self.d['FPS']}fps · {m} Mbps · gpu={self.d['GPU']} · audio={self.d['AUDIO']}"])
+        subprocess.Popen(["notify-send", "-a", self.T("APP_SCREEN_REC"), "-i", "media-record",
+                          self.T("SR_SAVED"),
+                          self.T("SR_SUMMARY").format(codec=self.d["CODEC"], fps=self.d["FPS"],
+                                             mbps=m, gpu=self.d["GPU"], audio=self.d["AUDIO"])])
         self._apply_record(was_active)
         self.win.destroy()
 
@@ -336,5 +348,6 @@ if __name__ == "__main__":
         log = os.path.expanduser("~/.cache/screen-rec-gui.log")
         with open(log, "a") as fh:
             fh.write(traceback.format_exc())
-        subprocess.Popen(["notify-send", "-a", "Recording options", "-u", "critical",
-                          "GUI failed", f"{e} — see {log}"])
+        subprocess.Popen(["notify-send", "-a", _T("SR_TITLE"), "-u", "critical",
+                          self.T("SR_GUI_FAIL"),
+                          self.T("SR_GUI_FAIL_B").format(e=e, log=log)])

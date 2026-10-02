@@ -1,0 +1,18 @@
+#!/bin/sh
+# Widget helpers for Eww (CPU / MEM percent, thermal).
+case "$1" in
+  cpu)
+    r1=$(grep '^cpu ' /proc/stat); sleep 0.25; r2=$(grep '^cpu ' /proc/stat)
+    awk -v a="$r1" -v b="$r2" 'BEGIN{
+      split(a,A); split(b,B);
+      dT=(B[2]+B[3]+B[4]+B[5]+B[6]+B[7]+B[8])-(A[2]+A[3]+A[4]+A[5]+A[6]+A[7]+A[8]);
+      dI=(B[5])-(A[5]);
+      printf "%.0f", (dT>0 ? 100*(dT-dI)/dT : 0)}'
+    ;;
+  mem)
+    free -m | awk '/Mem:/{printf "%.0f", $3/$2*100}'
+    ;;
+  temp)
+    sensors 2>/dev/null | awk -F'+' '/Package id 0:/{gsub(/[^0-9.]/,"",$2); printf "%.0f", $2; exit}'
+    ;;
+esac

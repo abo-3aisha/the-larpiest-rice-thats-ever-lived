@@ -12,6 +12,9 @@ import re
 import subprocess
 from datetime import datetime, timedelta
 
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import i18n
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
@@ -158,10 +161,19 @@ def load_hadiths():
         return []
 
 
+def _T(key):
+    try:
+        import i18n
+        return i18n.t(key)
+    except Exception:
+        return key
+
+
 class MyPrays(Gtk.Window):
     def __init__(self):
-        super().__init__(title="My Prays")
+        super().__init__(title=i18n.t("APP_MY_PRAYS"))
         self.set_default_size(600, 820)
+        self.T = _T
         self.nxt = None
         self.evs = []
 
@@ -214,28 +226,28 @@ class MyPrays(Gtk.Window):
         self.connect("destroy", Gtk.main_quit)
 
     def build_location(self):
-        frm = Gtk.Frame(label=" Location ")
+        frm = Gtk.Frame(label=self.T("MP_LOCATION"))
         grid = Gtk.Grid(column_spacing=8, row_spacing=6)
         grid.set_margin_start(12)
         grid.set_margin_end(12)
         grid.set_margin_top(10)
         grid.set_margin_bottom(12)
 
-        lbl_c = Gtk.Label(label="Country", xalign=0.0)
+        lbl_c = Gtk.Label(label=self.T("MP_COUNTRY"), xalign=0.0)
         self.country_combo = Gtk.ComboBoxText()
         for country, _ in COUNTRIES:
             self.country_combo.append_text(country)
         self.country_combo.connect("changed", self.on_country_changed)
 
-        lbl_i = Gtk.Label(label="City", xalign=0.0)
+        lbl_i = Gtk.Label(label=self.T("MP_CITY"), xalign=0.0)
         self.city_combo = Gtk.ComboBoxText()
         self.city_combo.connect("changed", self.on_city_changed)
 
-        lbl_la = Gtk.Label(label="Latitude", xalign=0.0)
+        lbl_la = Gtk.Label(label=self.T("MP_LAT"), xalign=0.0)
         self.lat_spin = Gtk.SpinButton.new_with_range(-90.0, 90.0, 0.0001)
         self.lat_spin.set_digits(5)
         self.lat_spin.set_width_chars(10)
-        lbl_lo = Gtk.Label(label="Longitude", xalign=0.0)
+        lbl_lo = Gtk.Label(label=self.T("MP_LON"), xalign=0.0)
         self.lon_spin = Gtk.SpinButton.new_with_range(-180.0, 180.0, 0.0001)
         self.lon_spin.set_digits(5)
         self.lon_spin.set_width_chars(10)
@@ -244,9 +256,9 @@ class MyPrays(Gtk.Window):
         self.detect_lbl.set_markup("<span size='small' color='#8a8a93'></span>")
 
         row_btns = Gtk.Box(spacing=8)
-        detect = Gtk.Button(label="Detect")
+        detect = Gtk.Button(label=self.T("MP_DETECT"))
         detect.connect("clicked", self.on_detect)
-        save = Gtk.Button(label="Save location")
+        save = Gtk.Button(label=self.T("MP_SAVE_LOC"))
         save.connect("clicked", self.on_save_location)
         row_btns.pack_start(detect, False, False, 0)
         row_btns.pack_start(save, False, False, 0)
@@ -266,7 +278,7 @@ class MyPrays(Gtk.Window):
         return frm
 
     def build_timezone(self):
-        frm = Gtk.Frame(label=" Clock / Timezone ")
+        frm = Gtk.Frame(label=self.T("MP_CLOCK_TZ"))
         self.tz_lbl = Gtk.Label(xalign=0.0, wrap=True)
         self.tz_lbl.set_margin_start(12)
         self.tz_lbl.set_margin_end(12)
@@ -276,7 +288,7 @@ class MyPrays(Gtk.Window):
         return frm
 
     def build_times(self):
-        frm = Gtk.Frame(label=" Today's times ")
+        frm = Gtk.Frame(label=self.T("MP_TODAY"))
         v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         grid = Gtk.Grid(column_spacing=16, row_spacing=2)
         self.time_lbl = {}
@@ -300,14 +312,14 @@ class MyPrays(Gtk.Window):
         return frm
 
     def build_alarm(self):
-        frm = Gtk.Frame(label=" Adhan alarm ")
+        frm = Gtk.Frame(label=self.T("MP_ADHAN"))
         grid = Gtk.Grid(column_spacing=12, row_spacing=6)
         grid.set_margin_start(12)
         grid.set_margin_end(12)
         grid.set_margin_top(10)
         grid.set_margin_bottom(12)
 
-        m = Gtk.Label(label="Master alarm (all prayers)", xalign=0.0)
+        m = Gtk.Label(label=self.T("MP_MASTER"), xalign=0.0)
         self.master = Gtk.Switch()
         grid.attach(m, 0, 0, 1, 1)
         grid.attach(self.master, 1, 0, 1, 1)
@@ -327,14 +339,14 @@ class MyPrays(Gtk.Window):
         return frm
 
     def build_hadith(self):
-        frm = Gtk.Frame(label=" Hadith of the day ")
+        frm = Gtk.Frame(label=self.T("MP_HADITH"))
         v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.hadith_lbl = Gtk.Label(xalign=0.0, wrap=True)
         self.hadith_lbl.set_line_wrap(True)
         self.hadith_lbl.set_margin_start(12)
         self.hadith_lbl.set_margin_end(12)
         self.hadith_lbl.set_margin_top(10)
-        another = Gtk.Button(label="Another hadith")
+        another = Gtk.Button(label=self.T("MP_ANOTHER"))
         another.connect("clicked", lambda *a: self.pick_hadith())
         v.pack_start(self.hadith_lbl, False, False, 0)
         v.pack_start(another, False, False, 0)

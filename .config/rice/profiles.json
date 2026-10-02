@@ -1,0 +1,38 @@
+{
+  "active": "Balanced",
+  "profiles": [
+    {
+      "name": "Balanced",
+      "builtin": true,
+      "ANIMATIONS": "1",
+      "BLUR": "1",
+      "CAVA": "1",
+      "WIDGETS": "1",
+      "TIMER": 15,
+      "IDLE_SCREEN": "1",
+      "LOGIN_ONLY": "1"
+    },
+    {
+      "name": "Saver",
+      "builtin": true,
+      "ANIMATIONS": 0,
+      "BLUR": 0,
+      "CAVA": 0,
+      "WIDGETS": 0,
+      "TIMER": 2,
+      "IDLE_SCREEN": 2,
+      "LOGIN_ONLY": 0
+    },
+    {
+      "name": "Gaming",
+      "builtin": true,
+      "ANIMATIONS": 1,
+      "BLUR": 0,
+      "CAVA": 0,
+      "WIDGETS": 0,
+      "TIMER": 0,
+      "IDLE_SCREEN": 0,
+      "LOGIN_ONLY": 0
+    }
+  ]
+}

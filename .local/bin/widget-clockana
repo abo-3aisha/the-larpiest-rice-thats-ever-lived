@@ -10,6 +10,7 @@ import math
 import os
 import sys
 import time
+import glob
 
 sys.path.insert(0, os.path.expanduser("~/.local/bin"))
 import widget_lib
@@ -328,9 +329,44 @@ def on_destroy(*a):
     Gtk.main_quit()
 
 
+def on_ac():
+    # True while plugged in. Handles AC0 / ACAD / AC and the ADP* naming.
+    for p in glob.glob("/sys/class/power_supply/*/online"):
+        try:
+            with open(p) as fh:
+                if fh.read().strip() == "1":
+                    return True
+        except OSError:
+            pass
+    # No battery at all -> desktop, treat as AC.
+    return not glob.glob("/sys/class/power_supply/BAT*")
+
+
 def main():
     da.connect("draw", on_draw)
-    GLib.timeout_add(16, lambda: (da.queue_draw(), True)[1])
+
+    # Redraw rate follows the power source. The 62fps smooth sweep is what
+    # makes this clock look premium, but it also burned 58% of a core. On AC
+    # keep it exactly as it was; on battery drop to one repaint per second so
+    # the second hand ticks like a classic analog clock.
+    state = {"ac": None, "src": 0}
+
+    def frame():
+        da.queue_draw()
+        return True
+
+    def reschedule():
+        ac = on_ac()
+        if ac == state["ac"]:
+            return
+        state["ac"] = ac
+        if state["src"]:
+            GLib.source_remove(state["src"])
+        state["src"] = GLib.timeout_add(16 if ac else 1000, frame)
+
+    GLib.timeout_add(5000, lambda: (reschedule(), True)[1])
+    reschedule()
+
     win.connect("destroy", on_destroy)
     win.show_all()
     Gtk.main()

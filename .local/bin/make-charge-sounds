@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# make-charge-sounds — generate the two plug/unplug chimes.
+# No sample files: each sound is two short sine notes with a fast decay, which
+# reads as a soft "tick" rather than a ringtone. Re-run this to tweak and
+# regenerate; charge-sound just plays whatever lands in this folder.
+set -eu
+OUT="$HOME/.local/share/sounds"
+mkdir -p "$OUT"
+
+# note() <hz> <seconds> <gain>  -> a decaying bell-ish partial
+note() {
+  printf "sine=frequency=%s:duration=%s,volume=%s,afade=t=out:st=0.015:d=%s" \
+    "$1" "$2" "$3" "$(awk "BEGIN{print $2-0.015}")"
+}
+
+# Reached 100%: a small three-note settle (E6 -> B5 -> E6), the "all done,
+# stop" sound. Deliberately gentler than charge-on so it reads as a conclusion
+# rather than another alert.
+ffmpeg -v error -y \
+  -f lavfi -i "$(note 1318.5 0.09 0.20)" \
+  -f lavfi -i "$(note 987.77 0.09 0.18)" \
+  -f lavfi -i "$(note 1318.5 0.26 0.24)" \
+  -filter_complex "[0:a]afade=t=in:st=0:d=0.004[a0];[1:a]afade=t=in:st=0:d=0.004[a1];[2:a]afade=t=in:st=0:d=0.004[a2];[a0][a1][a2]concat=n=3:v=0:a=1[out]" \
+  -map "[out]" -c:a libvorbis -q:a 3 "$OUT/charge-full.ogg"
+
+# Plugged in: rising fifth-ish, bright (A5 -> E6), "yep, it's charging".
+ffmpeg -v error -y \
+  -f lavfi -i "$(note 880 0.10 0.30)" \
+  -f lavfi -i "$(note 1318.5 0.16 0.26)" \
+  -filter_complex "[0:a]afade=t=in:st=0:d=0.004[a0];[1:a]afade=t=in:st=0:d=0.004[a1];[a0][a1]concat=n=2:v=0:a=1[out]" \
+  -map "[out]" -c:a libvorbis -q:a 3 "$OUT/charge-on.ogg"
+
+# Unplugged: falling, lower and shorter (E5 -> A4), "running on battery now".
+ffmpeg -v error -y \
+  -f lavfi -i "$(note 659.25 0.09 0.26)" \
+  -f lavfi -i "$(note 440 0.15 0.22)" \
+  -filter_complex "[0:a]afade=t=in:st=0:d=0.004[a0];[1:a]afade=t=in:st=0:d=0.004[a1];[a0][a1]concat=n=2:v=0:a=1[out]" \
+  -map "[out]" -c:a libvorbis -q:a 3 "$OUT/charge-off.ogg"
+
+ls -l "$OUT"/charge-*.ogg
+echo "regenerated."

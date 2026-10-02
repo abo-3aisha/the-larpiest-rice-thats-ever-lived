@@ -1,40 +1,64 @@
 #!/usr/bin/env bash
 # ctrl-center — standalone quick-settings app (SUPER+S), wofi-first.
+# Every label comes from the i18n engine (~/.local/bin/i18n.py), so the whole
+# menu speaks the user's language. Dispatch is by INDEX, not by matching the
+# visible text, so a translated menu can never break a keybind.
 # Uses the same q-toggle logic as the swaync buttons, in its own window menu.
 
-menu=$(
-    printf '%s\n' \
-        "󰖩  Wi-Fi" \
-        "󰂯  Bluetooth" \
-        "󰽥  Night Light" \
-        "󰝚  Volume +" \
-        "󰝝  Volume -" \
-        "󰝟  Mute / Unmute" \
-        "󰤽  Brightness +" \
-        "󰤾  Brightness -" \
-        "󰔟  Widgets" \
-        "󰌾  Lock Screen Style" \
-        "󱠧  My Prays" \
-        "  Recording Options" \
-        "󰐥  Power"
-)
+B="$HOME/.local/bin"
+ERRLOG="$HOME/.cache/rice-gui-error.log"
 
-sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Control Center 󰀄" --lines 12 --width 380)
+# A GUI app that dies while building its window prints nothing visible, so a
+# crash looks exactly like "nothing happened". Send every launch's stderr to a
+# log that can be read afterwards.
+gui() { "$@" 2>>"$ERRLOG"; }
+
+# shellcheck disable=SC1090
+eval "$("$B/i18n.py" dump)"
+
+menu=$(printf '%s\n' \
+    "󰖩  $T_CC_WIFI" \
+    "󰂯  $T_CC_BLUETOOTH" \
+    "󰝚  $T_CC_VOL_UP" \
+    "󰝝  $T_CC_VOL_DOWN" \
+    "󰝟  $T_CC_MUTE" \
+    "󰤽  $T_CC_BRIGHT_UP" \
+    "󰤾  $T_CC_BRIGHT_DOWN" \
+    "󰽥  $T_CC_NIGHT_LIGHT" \
+    "󰔟  $T_CC_WIDGETS" \
+    "󰌾  $T_CC_LOCK_STYLE" \
+    "󱠧  $T_CC_PRAYS" \
+    "󰐥  $T_CC_RECORDING" \
+    "󰗝  $T_CC_LANGUAGE" \
+    "󰓮  $T_CC_PERFORMANCE" \
+    "󰐥  $T_CC_POWER")
+
+prompt="$T_APP_CONTROL_CENTER 󰀄"
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$prompt" --lines 14 --width 380)
 [ -z "$sel" ] && exit 0
 
-case "$sel" in
-    *"Wi-Fi"*)              exec "$HOME/.local/bin/wifi-menu" ;;
-    *"Bluetooth"*)          "$HOME/.local/bin/q-toggle" bt ;;
-    *"Night Light"*)        "$HOME/.local/bin/q-toggle" night ;;
-    *"Volume +"*)           "$HOME/.local/bin/q-toggle" vol-up ;;
-    *"Volume -"*)           "$HOME/.local/bin/q-toggle" vol-down ;;
-    *"Mute"*)               "$HOME/.local/bin/q-toggle" vol-mute ;;
-    *"Brightness +"*)       "$HOME/.local/bin/q-toggle" bright-up ;;
-    *"Brightness -"*)      "$HOME/.local/bin/q-toggle" bright-down ;;
-    *"Widgets"*)           exec "$HOME/.local/bin/widget-manager" ;;
-    *"Recording"*)         exec "$HOME/.local/bin/screen-rec-gui" ;;
-    *"Lock Screen"*)       exec "$HOME/.local/bin/lockscreen-style" ;;
-    *"My Prays"*)          exec "$HOME/.local/bin/my-prays" ;;
-    *"Power"*)             exec "$HOME/.local/bin/power-menu" ;;
+# index of the chosen line, so translated text never affects dispatch
+mapfile -t rows < <(printf '%s\n' "$menu")
+pick=0
+for i in "${!rows[@]}"; do
+    [ "${rows[$i]}" = "$sel" ] && pick=$i && break
+done
+
+case "$pick" in
+    0)  gui "$B/wifi-menu" ;;
+    1)  "$B/q-toggle" bt ;;
+    2)  "$B/q-toggle" vol-up ;;
+    3)  "$B/q-toggle" vol-down ;;
+    4)  "$B/q-toggle" vol-mute ;;
+    5)  "$B/q-toggle" bright-up ;;
+    6)  "$B/q-toggle" bright-down ;;
+    7)  "$B/q-toggle" night ;;
+    8)  gui "$B/widget-manager" ;;
+    9)  gui "$B/lockscreen-style" ;;
+    10) gui "$B/my-prays" ;;
+    11) gui "$B/screen-rec-gui" ;;
+    12) gui "$B/language-and-time" ;;
+    13) gui "$B/performance-gui" ;;
+    14) gui "$B/power-menu" ;;
 esac
 exit 0

@@ -3,20 +3,46 @@
 # NOTE: HyprMod hijacks `hyprctl dispatch ...` (used to evaluate Lua), so
 #       `dispatch exit` / `dispatch lock` silently do nothing here.
 #       We use logind for logout and the real hyprlock binary for locking.
-sel=$(printf '%s\n' "󰿅  Log out" "󰤄  Lock" "󰌽  Cancel" | wofi --dmenu --prompt "Session" --lines 3 --width 260)
-case "$sel" in
-    *"Log out"*)
+# Every visible string comes from the i18n table and the dispatch is by INDEX,
+# so a translated menu can never pick the wrong action.
+B="$HOME/.local/bin"
+
+# shellcheck disable=SC1090
+eval "$("$B/i18n.py" dump)"
+
+menu=$(printf '%s\n' \
+    "󰍃  $T_SES_LOGOUT" \
+    "󰤶  $T_SES_LOCK" \
+    "󰌽  $T_SES_CANCEL")
+
+mapfile -t rows < <(printf '%s\n' "$menu")
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$T_SES_TITLE" \
+        --lines 1 --columns 3 --width 520)
+[ -z "$sel" ] && exit 0
+
+idx=-1
+for i in "${!rows[@]}"; do
+    [ "${rows[$i]}" = "$sel" ] && idx=$i && break
+done
+
+case "$idx" in
+    0)
+        yes=$(printf '󰄬  %s\n󰅙  %s\n' "$T_SES_CONFIRM_YES" "$T_SES_CONFIRM_NO" \
+              | wofi --dmenu --prompt "$T_SES_LOGOUT_Q" --lines 1 --columns 2 --width 260)
+        [ -z "$yes" ] && exit 0
+        mapfile -t yrows < <(printf '󰄬  %s\n󰅙  %s\n' "$T_SES_CONFIRM_YES" "$T_SES_CONFIRM_NO")
+        yi=-1
+        for i in "${!yrows[@]}"; do
+            [ "${yrows[$i]}" = "$yes" ] && yi=$i && break
+        done
+        [ "$yi" -ne 0 ] && exit 0
         if command -v loginctl >/dev/null 2>&1 && [ -n "${XDG_SESSION_ID:-}" ]; then
             loginctl terminate-session "$XDG_SESSION_ID"
         else
             pkill -x Hyprland || hyprctl dispatch exit
         fi
         ;;
-    *"Lock"*)
-        exec hyprlock
-        ;;
-    *)
-        exit 0
-        ;;
+    1) exec hyprlock ;;
+    *) exit 0 ;;
 esac
 exit 0

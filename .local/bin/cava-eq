@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+# Reads cava raw frames (28 bars, 16bit LE mono) from raw.conf and pushes
+# smoothed levels 0..100 into the eww "cavadock" layer (bar0..bar27).
+# Idle sine keeps the EQ alive when nothing is playing.
+# Hardened: logs every failure to ~/.cache/cava-eq.log and auto-restarts
+# cava if it exits.
+import math
+import os
+import subprocess
+import sys
+import time
+
+BARS = int(sys.argv[1]) if len(sys.argv) > 1 else 28
+FRAME = BARS * 2
+CONF = os.path.expanduser("~/.config/cava/raw.conf")
+LOG = os.path.expanduser("~/.cache/cava-eq.log")
+
+_sm = [0.0] * BARS
+_idle = 0
+
+
+def log(msg):
+    try:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%H:%M:%S ") + msg + "\n")
+    except Exception:
+        pass
+
+
+def push(vals):
+    try:
+        args = ["eww", "update"] + ["bar%d=%d" % (i, max(0, min(100, vals[i]))) for i in range(BARS)]
+        subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        log("eww update failed: %r" % (e,))
+
+
+def run_cava():
+    global _sm, _idle
+    proc = subprocess.Popen(["cava", "-p", CONF], stdout=subprocess.PIPE)
+    out = proc.stdout
+    log("cava started pid=%d" % proc.pid)
+    while True:
+        try:
+            chunk = out.read(FRAME)
+        except Exception as e:
+            log("read error: %r" % (e,))
+            break
+        if len(chunk) < FRAME:
+            log("cava EOF (short %d bytes)" % len(chunk))
+            break
+        buf = list(chunk)
+        vals = [(buf[i] + (buf[i + 1] << 8)) / 65536.0 for i in range(0, FRAME, 2)]
+        for i, v in enumerate(vals):
+            _sm[i] = 0.82 * _sm[i] + 0.18 * v
+        if max(_sm) < 0.02:
+            _idle += 1
+            vals = [max(0.0, min(1.0, math.sin(_idle * 0.12 + i * 0.35) * 0.04 + 0.04)) for i in range(BARS)]
+        else:
+            _idle = 0
+            vals = list(_sm)
+        push([math.floor(v * 100) for v in vals])
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
+while True:
+    try:
+        run_cava()
+    except Exception as e:
+        log("cava run crashed: %r" % (e,))
+    log("restarting cava in 1s")
+    time.sleep(1)

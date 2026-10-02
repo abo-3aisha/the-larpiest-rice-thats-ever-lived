@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+# cava-dock: a TRANSPARENT bottom layer that draws SMOOTH gold EQ bars with
+# Cairo (not block-glyph text). Reads the same raw cava stream the terminal
+# uses; renders 30fps; static calm ridge when there is no audio.
+import math
+import os
+import signal
+import subprocess
+import sys
+import threading
+
+BARS = 64
+FRAME = BARS * 2
+MARGIN = 10
+GAP = 2
+ROUND = 3
+MAX_H_FACTOR = 0.50
+FALLBACK_BASE = (255, 210, 63)
+
+def load_ramp():
+    base = FALLBACK_BASE
+    try:
+        import re
+        txt = open(os.path.expanduser("~/.config/hypr/theme.lua")).read()
+        m = re.search(r'accent\s*=\s*"([0-9a-fA-F]{6})', txt)
+        if m:
+            h = m.group(1)
+            base = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except Exception:
+        pass
+    top = tuple(min(255, int(v + (255 - v) * 0.40)) for v in base)
+    return top, base
+
+_sm = [0.0] * BARS
+_calm = 0
+_IDLE = [0.015] * BARS
+_stop = threading.Event()
+_lock = threading.Lock()
+
+
+def reader():
+    while not _stop.is_set():
+        proc = subprocess.Popen(["cava", "-p", os.path.expanduser("~/.config/cava/raw.conf")],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            while not _stop.is_set():
+                chunk = proc.stdout.read(FRAME)
+                if not chunk:
+                    break
+                if len(chunk) < FRAME:
+                    continue
+                buf = list(chunk)
+                vals = [(buf[i] + (buf[i + 1] << 8)) / 65536.0 for i in range(0, FRAME, 2)]
+                global _sm, _calm
+                with _lock:
+                    for i, v in enumerate(vals):
+                        _sm[i] = 0.82 * _sm[i] + 0.18 * v
+                    if sum(_sm) / BARS < 0.006:
+                        _calm += 1
+                    else:
+                        _calm = 0
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        if not _stop.is_set():
+            threading.Event().wait(0.5)
+
+
+def bar_color(i, ramp):
+    return ramp
+
+
+def rounded_top(ctx, x, y, w, h):
+    r = min(ROUND, w / 2, h)
+    ctx.new_path()
+    ctx.move_to(x, y + r)
+    ctx.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+    ctx.line_to(x + w - r, y)
+    ctx.arc(x + w - r, y + r, r, 1.5 * math.pi, 2 * math.pi)
+    ctx.line_to(x + w, y + h)
+    ctx.line_to(x, y + h)
+    ctx.close_path()
+
+
+def main():
+    pidf = os.path.expanduser("~/.cache/cava-dock.pid")
+    try:
+        if os.path.exists(pidf):
+            with open(pidf) as f:
+                old = int(f.read().strip())
+            try:
+                os.kill(old, 0)
+                print("cava-dock already running", file=sys.stderr)
+                return
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                return
+        with open(pidf, "w") as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        pass
+
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk, GLib, Gtk
+    try:
+        import cairo
+    except ImportError:
+        from gi.repository import cairo
+
+    GLib.set_prgname("cava-dock")
+    layer = False
+    try:
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import GtkLayerShell
+        layer = True
+    except Exception:
+        pass
+
+    win = Gtk.Window()
+    win.set_title("cava-dock")
+    win.set_decorated(False)
+    win.set_skip_taskbar_hint(True)
+    win.set_skip_pager_hint(True)
+    win.set_accept_focus(False)
+    win.set_can_focus(False)
+    win.set_resizable(False)
+    win.set_app_paintable(True)
+    win.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+    try:
+        visual = win.get_screen().get_rgba_visual()
+        if visual:
+            win.set_visual(visual)
+    except Exception:
+        pass
+
+    da = Gtk.DrawingArea()
+    da.set_size_request(0, 0)
+    win.add(da)
+
+    scr = win.get_screen()
+    mon = scr.get_monitor_geometry(scr.get_primary_monitor()) if scr else None
+    htarget = int(mon.height * MAX_H_FACTOR) if mon else 300
+    ramp_top, ramp_base = load_ramp()
+
+    if layer:
+        GtkLayerShell.init_for_window(win)
+        GtkLayerShell.set_layer(win, GtkLayerShell.Layer.BOTTOM)
+        GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.LEFT, True)
+        GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.RIGHT, True)
+        GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.BOTTOM, True)
+        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.BOTTOM, 6)
+        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.LEFT, MARGIN)
+        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.RIGHT, MARGIN)
+        GtkLayerShell.set_namespace(win, "cava-dock")
+        GtkLayerShell.set_keyboard_mode(win, GtkLayerShell.KeyboardMode.NONE)
+        win.set_size_request(0, htarget)
+    else:
+        win.set_default_size(1600, htarget)
+        win.set_keep_above(True)
+
+    def on_draw(w, ctx):
+        alloc = w.get_allocation()
+        W, H = alloc.width, alloc.height
+        ctx.set_operator(cairo.OPERATOR_CLEAR)
+        ctx.paint()
+        ctx.set_operator(cairo.OPERATOR_OVER)
+        bw = (W - GAP * (BARS - 1)) / BARS
+        for i in range(BARS):
+            h = max(3.0, min(H - 4, disp[i] * (H - 4)))
+            x = i * (bw + GAP)
+            y = H - h
+            if h <= 0:
+                continue
+            grad = cairo.LinearGradient(0, y, 0, H)
+            grad.add_color_stop_rgb(0, ramp_top[0] / 255, ramp_top[1] / 255, ramp_top[2] / 255)
+            grad.add_color_stop_rgb(1, ramp_base[0] / 255, ramp_base[1] / 255, ramp_base[2] / 255)
+            ctx.set_source(grad)
+            rounded_top(ctx, x, y, bw, h)
+            ctx.fill()
+        return False
+
+    disp = [0.0] * BARS
+    settled = [False]
+
+    def tick():
+        with _lock:
+            target = list(_sm)
+            calm = _calm
+        idle = calm >= 30
+        moved = False
+        for i in range(BARS):
+            t = _IDLE[i] if idle else target[i]
+            d = disp[i]
+            d2 = d + (t - d) * (0.30 if idle else (0.70 if t > d else 0.35))
+            if abs(t - d2) > 0.002:
+                moved = True
+            disp[i] = d2
+        # Every bar has reached its target -> this frame would be identical to
+        # the last one, so don't repaint. Idle audio used to cost 62 redraws a
+        # second for a picture that never changed.
+        if moved or not settled[0]:
+            settled[0] = moved
+            da.queue_draw()
+        return True
+
+    def quit_all(*a):
+        _stop.set()
+        Gtk.main_quit()
+        return False
+
+    da.connect("draw", on_draw)
+    GLib.timeout_add(16, tick)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, quit_all)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, quit_all)
+
+    win.show_all()
+    threading.Thread(target=reader, daemon=True).start()
+    try:
+        Gtk.main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _stop.set()
+        try:
+            os.unlink(pidf)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    main()

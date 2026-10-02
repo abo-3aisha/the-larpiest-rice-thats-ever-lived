@@ -1,27 +1,90 @@
 #!/usr/bin/env python3
-# swaync-smart-config — builds swaync config.json from config.json.tpl.
-# Panel tiles are REAL state widgets (type=toggle): swiftnc asks each their
-# update-command every time the control center opens, so Wi-Fi/Bluetooth/Night
-# always reflect the true on/off, and the active tile is filled with the
-# wallpaper accent (Android quick-settings style).
+"""swaync-smart-config — builds swaync config.json from config.json.tpl.
+
+Panel tiles are REAL state widgets (type=toggle): swaync asks each their
+update-command every time the control center opens, so Wi-Fi/Bluetooth/Night
+always reflect the true on/off, and the active tile is filled with the
+wallpaper accent (Android quick-settings style).
+
+Every visible string is injected here from the i18n engine, so the template
+stays the English source of truth and switching language just re-runs this.
+"""
 import json
 import os
 import pathlib
+import sys
 
 HOME = os.path.expanduser("~")
 TPL = pathlib.Path(HOME + "/.config/swaync/config.json.tpl")
 OUT = pathlib.Path(HOME + "/.config/swaync/config.json")
+PERF_CONF = pathlib.Path(HOME + "/.config/rice/perf.conf")
+PERF = HOME + "/.local/bin/perf-mode"
+
+sys.path.insert(0, HOME + "/.local/bin")
+import i18n  # noqa: E402
+
+# exact English string in the template  ->  i18n key
+STRINGS = {
+    "Notifications": "NC_NOTIFICATIONS",
+    "Clear All": "NC_CLEAR_ALL",
+    "Do Not Disturb": "NC_DND",
+    "MIC": "NC_MIC_LABEL",
+    "Wi-Fi": "NC_WIFI",
+    "Bluetooth": "NC_BLUETOOTH",
+    "Night Light": "NC_NIGHT_LIGHT",
+    "Power": "NC_POWER",
+    "Screenshot": "NC_SCREENSHOT",
+    "Screen record": "NC_RECORD",
+}
+
+PERF_TILE = {
+    "label": "",                      # filled from i18n
+    "type": "toggle",
+    "command": "perf-mode {toggle}",
+    "update-command": ("grep -E '^MODE=' %s 2>/dev/null | grep -q saver "
+                       "&& echo true || echo false") % PERF_CONF,
+}
+
+
+def translate(obj):
+    """Walk the tree; when a string is a known English label, swap in the
+    active language. Icons (private-use Nerd Font glyphs) are preserved."""
+    if isinstance(obj, dict):
+        return {k: translate(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [translate(v) for v in obj]
+    if isinstance(obj, str):
+        for en, key in STRINGS.items():
+            if obj.endswith(en):
+                return obj[:len(obj) - len(en)] + i18n.t(key)
+        return obj
+    return obj
 
 
 def main():
-    text = TPL.read_text()
-    json.loads(text)  # validate before touching the live file
+    cfg = translate(json.loads(TPL.read_text(encoding="utf-8")))
+
+    # Performance tile goes right after Screen record
     try:
-        old = OUT.read_text()
+        quick = cfg["widget-config"]["menubar"]["buttons#quick"]
+        actions = quick["actions"]
+    except (KeyError, TypeError):
+        actions = None
+    if isinstance(actions, list) and not any(
+            isinstance(a, dict) and "perf-mode" in str(a.get("command", ""))
+            for a in actions):
+        tile = dict(PERF_TILE)
+        tile["label"] = "\uf085  " + i18n.t("NC_PERF")
+        actions.append(tile)
+
+    text = json.dumps(cfg, indent=4, ensure_ascii=False) + "\n"
+    json.loads(text)                       # never write an unvalidated config
+    try:
+        old = OUT.read_text(encoding="utf-8")
     except FileNotFoundError:
         old = ""
     if text != old:
-        OUT.write_text(text)
+        OUT.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

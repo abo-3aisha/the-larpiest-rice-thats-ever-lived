@@ -51,8 +51,11 @@ NAMES = {
 }
 
 TEXT = {
-    "clock": 'cmd[update:1000] echo "$(LC_TIME=C date +"%I:%M %p")"',
-    "date": 'cmd[update:30000] echo "$(LC_TIME=C date +"%A, %B %d")"',
+    # `i18n.py format` with no argument reads CLOCK / DATE from
+    # ~/.config/rice/i18n.conf and renders day/month names from the chosen
+    # language file — so the lock screen follows the rice's language.
+    "clock": "cmd[update:1000] ~/.local/bin/i18n.py format",
+    "date": "cmd[update:30000] ~/.local/bin/i18n.py format --date",
     "hijri": "cmd[update:3600000] ~/.local/bin/hijri-text",
     "prayer": "cmd[update:30000] ~/.local/bin/prayer-times --next",
     "music": "cmd[update:2000] playerctl -a metadata --format '{{artist}} - {{title}}' 2>/dev/null || echo 'No music'",
@@ -212,8 +215,19 @@ def save(data):
                     "Lock screen", "Saved. Press SUPER+L to preview."], check=False)
 
 
+def _T(key):
+    """Look a string up in the active language table (no fallback, no mixing)."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import i18n
+        return i18n.t(key)
+    except Exception:
+        return key
+
+
 class Manager(Gtk.Window):
     def __init__(self):
+        self.T = _T
         super().__init__(title="Lock Screen Style")
         self.set_default_size(820, 560)
         self.data = {k: dict(DEFAULTS[k]) for k in KEYS}
@@ -256,13 +270,13 @@ class Manager(Gtk.Window):
             sp = Gtk.SpinButton.new_with_range(14, 450, 1)
             sp.set_value(int(self.data[k].get("size", DEFAULTS[k]["size"])))
             sp.set_width_chars(3)
-            row.pack_start(Gtk.Label(label="Pt"), False, False, 0)
+            row.pack_start(Gtk.Label(label=self.T("LS_PT")), False, False, 0)
             row.pack_start(sp, False, False, 0)
             lst.pack_start(row, False, False, 0)
             self.checks[k] = chk
             self.spins[k] = sp
 
-        hint = Gtk.Label(label="Drag boxes to move; Pt sets text size.")
+        hint = Gtk.Label(label=self.T("LS_HINT"))
         hint.set_halign(Gtk.Align.START)
         hint.get_style_context().add_class("dim")
         lst.pack_start(hint, False, False, 0)
@@ -279,9 +293,9 @@ class Manager(Gtk.Window):
         mid.pack_start(self.da, True, True, 0)
 
         btns = Gtk.Box(spacing=8)
-        applyb = Gtk.Button(label="Save & Apply")
+        applyb = Gtk.Button(label=self.T("LS_SAVE"))
         applyb.connect("clicked", self.on_apply)
-        closeb = Gtk.Button(label="Close")
+        closeb = Gtk.Button(label=self.T("LS_CLOSE"))
         closeb.connect("clicked", lambda *a: self.destroy())
         btns.pack_start(applyb, False, False, 0)
         btns.pack_start(closeb, False, False, 0)

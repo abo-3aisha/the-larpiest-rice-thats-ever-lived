@@ -41,7 +41,7 @@ def draw(vals):
             if level > ROWS:
                 level = ROWS
             line += (ROW_CELL[r] if level > r else " ") * 2
-        rendered.append(f"\033[{7 + r};1H\033[K" + ROW_COLOR[r] + line + "\033[0m")
+        rendered.append(f"\033[{10 + r};1H\033[K" + ROW_COLOR[r] + line + "\033[0m")
     sys.stdout.write("".join(rendered))
     sys.stdout.flush()
 

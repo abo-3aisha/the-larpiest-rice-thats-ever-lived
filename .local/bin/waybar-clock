@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# waybar-clock — self-contained, language-aware clock for Waybar.
+#
+# Waybar's built-in `clock` module formats with the SYSTEM locale, so a missing
+# generated locale silently leaks English day/month names. This runs the i18n
+# engine instead, which owns its own day/month tables, so the bar is correct in
+# all four languages even before `locale-gen` has ever been run.
+#
+# Usage: waybar-clock [clock|date]
+set -u
+exec "$HOME/.local/bin/i18n.py" format ${1:+"--date"}

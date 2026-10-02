@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# flatpak-restore [TAR] — restore a flatpak backup (default /mnt/hdd/flatpak-apps.tar.gz)
+set -u
+SRC="${1:-/mnt/hdd/flatpak-apps.tar.gz}"
+
+[ -f "$SRC" ] || { echo "backup file not found: $SRC"; exit 1; }
+command -v flatpak >/dev/null 2>&1 || { echo "flatpak is not installed"; exit 1; }
+
+echo ">>> extracting $SRC to / (needs sudo) ..."
+sudo tar xzf "$SRC" -C / || { echo "extract failed"; exit 1; }
+
+echo ">>> repairing flatpak repository..."
+sudo flatpak repair
+
+# make sure the flathub remote exists for future updates
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
+
+echo ">>> apps restored:"
+flatpak list --app 2>/dev/null
+
+# user-level apps, if a user tar sits next to the system one
+USER_TAR="${SRC%/flatpak-apps*}/flatpak-user-*.tar.gz"
+for f in $USER_TAR; do
+    if [ -f "$f" ]; then
+        echo ">>> extracting user apps $f -> $HOME"
+        [ -d "$HOME/.local/share/flatpak" ] && echo "    (skip: user flatpak dir already exists)" && break
+        tar xzf "$f" -C "$HOME"
+        # give ownership back to the user (the "$USER" step) if it got root
+        [ "$(stat -c %U "$HOME/.local/share/flatpak" 2>/dev/null)" = "$USER" ] || \
+            sudo chown -R "$USER:$USER" "$HOME/.local/share/flatpak" 2>/dev/null && \
+            echo "    ownership fixed -> $USER"
+    fi
+    break
+done
+
+# app data, if the tar sits next to the system one
+VAR="${SRC%/flatpak-apps*}/flatpak-varapp-*.tar.gz"
+for f in $VAR; do
+    if [ -f "$f" ]; then
+        echo ">>> restoring app data $f -> $HOME"
+        tar xzf "$f" -C "$HOME" || echo "   (warn) app-data restore failed"
+    fi
+    break
+done
+
+notify-send -u low -t 4000 "Flatpak" "restore done — log out & back in for icons" 2>/dev/null
+echo "Done. Log out/in so the launcher picks up the new apps."

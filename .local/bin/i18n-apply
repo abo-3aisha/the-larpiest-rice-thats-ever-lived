@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# i18n-apply — the single applier behind the language & time app.
+# Rewrites every text surface from ~/.config/rice/i18n.conf, then reloads.
+#   i18n-apply            full apply
+#   i18n-apply --locale   only report whether the system locale exists
+B="$HOME/.local/bin"
+CONF="$HOME/.config/rice/i18n.conf"
+I18N="$B/i18n.py"
+WAYBAR="$HOME/.config/waybar"
+WAYBAR_FILES=(config config.json config.jsonc)
+LOCKCONF="$HOME/.config/hypr/hyprlock.conf"
+LOCKSTYLE="$B/lockscreen-style"
+
+get() { grep -E "^$1=" "$CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'; }
+
+LANG_CODE=$(get LANG); [ -z "$LANG_CODE" ] && LANG_CODE=en
+CLOCK=$(get CLOCK);     [ -z "$CLOCK" ] && CLOCK="%I:%M %p"
+DATE=$(get DATE);       [ -z "$DATE" ] && DATE="%a, %b %d"
+LOCALE=$(grep -E "^CODE=" "$HOME/.local/share/rice-lang/$LANG_CODE.conf" 2>/dev/null \
+         | head -1 | cut -d= -f2- | tr -d '"')
+[ -z "$LOCALE" ] && LOCALE="en_US.UTF-8"
+
+if [ "$1" = "--locale" ]; then
+    if locale -a 2>/dev/null | grep -qix "${LOCALE%%.*}"; then
+        echo "available: $LOCALE"
+    else
+        echo "missing: $LOCALE"
+    fi
+    exit 0
+fi
+
+# ---------------------------------------------------------------- 1. locale
+# systemd user environment + environment.d, so GTK apps and anything started
+# from the compositor pick the language up on the next login.
+mkdir -p "$HOME/.config/environment.d"
+cat > "$HOME/.config/environment.d/10-locale.conf" <<EOF
+LANG=$LOCALE
+LC_TIME=$LOCALE
+LC_MESSAGES=$LOCALE
+EOF
+systemctl --user import-environment LANG LC_TIME LC_MESSAGES 2>/dev/null
+
+# ---------------------------------------------------------------- 2. waybar
+# The clock's strftime FORMAT comes from our config; the day/month NAMES come
+# from the session locale above. Both must be in place for a translated bar.
+for f in "${WAYBAR_FILES[@]}"; do
+    p="$WAYBAR/$f"
+    [ -f "$p" ] || continue
+    python3 - "$p" "$CLOCK" "$DATE" <<'PY'
+import re, sys
+
+path, clock, date = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open(path, encoding="utf-8").read()
+
+# Locate the "clock" MODULE by BRACE MATCHING — a regex with [^}] cannot span
+# the block because the clock's own "format" value already contains a '}', and
+# the bare string "clock" also appears earlier inside "modules-center".
+m = re.search(r'"clock"\s*:\s*\{', s)
+if not m:
+    sys.exit(0)
+brace = m.end() - 1
+depth, j = 0, brace
+while j < len(s):
+    if s[j] == "{":
+        depth += 1
+    elif s[j] == "}":
+        depth -= 1
+        if depth == 0:
+            break
+    j += 1
+if depth != 0:
+    sys.exit(0)
+
+block = s[brace:j + 1]
+new = re.sub(r'("format"\s*:\s*")\{:[^"]*\}(")',
+             lambda m: m.group(1) + "{:" + clock + "}" + m.group(2), block)
+new = re.sub(r'("format-alt"\s*:\s*")\{:[^"]*\}(")',
+             lambda m: m.group(1) + "{:" + date + "}" + m.group(2), new)
+
+if new != block:
+    open(path, "w", encoding="utf-8").write(s[:brace] + new + s[j + 1:])
+    print("  updated %s" % path)
+PY
+done
+
+# ---------------------------------------------------------------- 3. hyprlock
+# lockscreen-style already emits the language-agnostic
+#   cmd[update:1000] ~/.local/bin/i18n.py format
+# so switching language needs NO rewrite; only the legacy hardcoded
+# `date +"..."` commands need the one-time migration.
+python3 "$B/lock-i18n-migrate.py"
+
+# ---------------------------------------------------------------- 4. reload
+lget() { "$I18N" get "$1" 2>/dev/null; }
+
+pkill -SIGUSR2 -x waybar >/dev/null 2>&1
+( waybar >/dev/null 2>&1 & )
+swaync-client -R >/dev/null 2>&1
+swaync-client -rs >/dev/null 2>&1
+"$B/swaync-smart-config" >/dev/null 2>&1
+"$B/widgets-apply" --force-restart >/dev/null 2>&1
+hyprctl reload >/dev/null 2>&1
+
+if ! locale -a 2>/dev/null | grep -qix "${LOCALE%%.*}"; then
+    notify-send -a Rice -t 12000 -u critical \
+        "$(lget APP_LOCALE_MISSING)" "$LOCALE"
+else
+    notify-send -a Rice -t 2600 \
+        "Rice · $(lget APP_LANGUAGE_TIME) · $LOCALE"
+fi

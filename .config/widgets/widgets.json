@@ -1,0 +1,86 @@
+{
+  "v": 1,
+  "widgets": {
+    "clockana": {
+      "enabled": true,
+      "workspace": 1,
+      "x": 0.092,
+      "y": 0.131,
+      "w": 0.14,
+      "h": 0.25,
+      "scope": "workspace"
+    },
+    "clock": {
+      "enabled": false,
+      "workspace": 1,
+      "x": 0.03,
+      "y": 0.03,
+      "w": 0.16,
+      "h": 0.1,
+      "scope": "workspace"
+    },
+    "music": {
+      "enabled": true,
+      "workspace": 1,
+      "x": 0.384,
+      "y": 0.027,
+      "w": 0.24,
+      "h": 0.09,
+      "scope": "workspace"
+    },
+    "sys": {
+      "enabled": false,
+      "workspace": 1,
+      "x": 0.03,
+      "y": 0.16,
+      "w": 0.16,
+      "h": 0.14,
+      "scope": "workspace"
+    },
+    "miku": {
+      "enabled": false,
+      "workspace": 1,
+      "x": 0.5,
+      "y": 0.8,
+      "w": 0.12,
+      "h": 0.06,
+      "scope": "workspace"
+    },
+    "prayer": {
+      "enabled": true,
+      "workspace": 1,
+      "x": 0.797,
+      "y": 0.047,
+      "w": 0.2,
+      "h": 0.1,
+      "scope": "workspace"
+    },
+    "hijri": {
+      "enabled": true,
+      "workspace": 1,
+      "x": 0.8,
+      "y": 0.28,
+      "w": 0.2,
+      "h": 0.1,
+      "scope": "workspace"
+    },
+    "pet": {
+      "enabled": false,
+      "workspace": 1,
+      "x": 0.8,
+      "y": 0.5,
+      "w": 0.18,
+      "h": 0.38,
+      "scope": "workspace"
+    },
+    "cava": {
+      "enabled": true,
+      "workspace": 0,
+      "x": 0.0,
+      "y": 0.0,
+      "w": 1.0,
+      "h": 0.0,
+      "scope": "all"
+    }
+  }
+}

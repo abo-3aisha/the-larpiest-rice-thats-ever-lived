@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+# Widget Manager — drag-and-drop placement of desktop widgets.
+# Opens from the SUPER+S control center; writes widgets.json + applies live.
+import json
+import os
+import subprocess
+import sys
+import warnings
+
+warnings.filterwarnings("ignore", module="gi")
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk
+
+import widget_lib
+
+CFG = widget_lib.CFG
+KEYS = ["clockana", "clock", "music", "sys", "miku", "prayer", "hijri", "pet"]
+NAMES = {"clockana": "Analog Clock", "clock": "Clock", "music": "Now Playing",
+         "sys": "System", "miku": "Miku Kaomoji", "prayer": "Prayer",
+         "hijri": "Hijri Date", "pet": "Miku Pet"}
+
+PAD = 8
+
+
+def _T(key):
+    """Look a string up in the active language table (no fallback, no mixing)."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import i18n
+        return i18n.t(key)
+    except Exception:
+        return key
+
+
+class Manager(Gtk.Window):
+    def __init__(self):
+        self.T = _T
+        super().__init__(title="Widget Manager")
+        self.set_default_size(780, 520)
+        self.data = widget_lib.load()
+        self.active = None
+        self.spins = {}
+        self.checks = {}
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_margin_start(12)
+        root.set_margin_end(12)
+        root.set_margin_top(12)
+        root.set_margin_bottom(12)
+        self.add(root)
+
+        title = Gtk.Label(label=("Desktop Widgets — drag the boxes to place them. "
+                                 "All widgets live UNDER your apps, on every workspace; "
+                                 "only Miku Pet is a normal window (has a workspace)."))
+        title.set_line_wrap(True)
+        title.set_halign(Gtk.Align.START)
+        root.pack_start(title, False, False, 0)
+
+        mid = Gtk.Box(spacing=14)
+        root.pack_start(mid, True, True, 0)
+
+        # --- left: enable + workspace per widget ---
+        lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        lst.set_size_request(270, -1)
+        mid.pack_start(lst, False, False, 0)
+        for k in KEYS:
+            row = Gtk.Box(spacing=8)
+            chk = Gtk.CheckButton(label=NAMES[k])
+            chk.set_active(bool(self.data.get(k, {}).get("enabled")))
+            row.pack_start(chk, True, True, 0)
+            if k == "pet":
+                sp = Gtk.SpinButton.new_with_range(1, 10, 1)
+                sp.set_value(int(self.data.get(k, {}).get("workspace", 1) or 1))
+                sp.set_width_chars(2)
+                row.pack_start(Gtk.Label(label=self.T("WM_WS")), False, False, 0)
+                row.pack_start(sp, False, False, 0)
+                self.spins[k] = sp
+            lst.pack_start(row, False, False, 0)
+            self.checks[k] = chk
+
+        cava_row = Gtk.Box(spacing=8)
+        ck = Gtk.CheckButton(label=self.T("WM_CAVA"))
+        ck.set_active(bool(self.data.get("cava", {}).get("enabled")))
+        cava_row.pack_start(ck, False, False, 0)
+        lst.pack_start(cava_row, False, False, 0)
+        self.checks["cava"] = ck
+
+        hint = Gtk.Label(label=self.T("WM_HINT"))
+        hint.set_halign(Gtk.Align.START)
+        hint.get_style_context().add_class("dim")
+        lst.pack_start(hint, False, False, 0)
+
+        # --- right: preview ---
+        self.da = Gtk.DrawingArea()
+        self.da.set_size_request(430, 250)
+        self.da.set_events(Gdk.EventMask.BUTTON_PRESS_MASK |
+                           Gdk.EventMask.BUTTON_RELEASE_MASK |
+                           Gdk.EventMask.POINTER_MOTION_MASK)
+        self.da.connect("draw", self.on_draw)
+        self.da.connect("button-press-event", self.on_press)
+        self.da.connect("button-release-event", self.on_release)
+        self.da.connect("motion-notify-event", self.on_motion)
+        mid.pack_start(self.da, True, True, 0)
+
+        # --- bottom ---
+        btns = Gtk.Box(spacing=8)
+        applyb = Gtk.Button(label=self.T("WM_SAVE"))
+        applyb.connect("clicked", self.on_apply)
+        closeb = Gtk.Button(label=self.T("WM_CLOSE"))
+        closeb.connect("clicked", lambda *a: self.destroy())
+        btns.pack_start(applyb, False, False, 0)
+        btns.pack_start(closeb, False, False, 0)
+        root.pack_start(btns, False, False, 0)
+
+        self.add_css()
+
+    def add_css(self):
+        a = widget_lib.accent()
+        p = Gtk.CssProvider()
+        p.load_from_data(b"""
+window { background: rgba(16,16,20,0.96); }
+.dim { color: rgba(230,230,235,0.6); font-size: 11px; }
+""")
+        try:
+            Gtk.StyleContext.add_provider_for_screen(self.get_screen(), p, 800)
+        except Exception:
+            pass
+
+    def preview_geom(self):
+        aw = self.da.get_allocated_width()
+        ah = self.da.get_allocated_height()
+        scale = min(aw / 1600.0, ah / 900.0)
+        w, h = 1600 * scale, 900 * scale
+        ox = (aw - w) / 2
+        oy = (ah - h) / 2
+        return ox, oy, w, h
+
+    def box_rect(self, e, ox, oy, w, h):
+        x = ox + e.get("x", 0.5) * w
+        y = oy + e.get("y", 0.5) * h
+        bw = max(24, e.get("w", 0.2) * w)
+        bh = max(14, e.get("h", 0.1) * h)
+        return x, y, bw, bh
+
+    def on_draw(self, da, ctx):
+        a = widget_lib.accent()
+        ox, oy, w, h = self.preview_geom()
+        ctx.set_source_rgba(0.09, 0.09, 0.12, 1)
+        ctx.rectangle(ox, oy, w, h)
+        ctx.fill()
+        ctx.set_source_rgba(1, 1, 1, 0.18)
+        ctx.set_line_width(1)
+        ctx.rectangle(ox, oy, w, h)
+        ctx.stroke()
+        for k in KEYS:
+            e = self.data.get(k, {})
+            if not e.get("enabled"):
+                continue
+            x, y, bw, bh = self.box_rect(e, ox, oy, w, h)
+            if k == self.active:
+                ctx.set_source_rgba(1, 0.9, 0.45, 0.95)
+            else:
+                c = tuple(int(a[i:i + 2], 16) / 255 for i in (0, 2, 4))
+                ctx.set_source_rgba(c[0], c[1], c[2], 0.9)
+            r = 5
+            ctx.new_path()
+            ctx.arc(x + r, y + r, r, 180 / 180 * 3.1415926, 270 / 180 * 3.1415926)
+            ctx.arc(x + bw - r, y + r, r, 270 / 180 * 3.1415926, 0)
+            ctx.arc(x + bw - r, y + bh - r, r, 0, 90 / 180 * 3.1415926)
+            ctx.arc(x + r, y + bh - r, r, 90 / 180 * 3.1415926, 180 / 180 * 3.1415926)
+            ctx.close_path()
+            ctx.fill()
+            ctx.set_source_rgba(0, 0, 0, 0.45)
+            ctx.set_font_size(10)
+            ctx.move_to(x + 6, y + 12)
+            ctx.show_text(NAMES[k])
+        return False
+
+    def pick(self, px, py):
+        ox, oy, w, h = self.preview_geom()
+        for k in KEYS:
+            e = self.data.get(k, {})
+            if not e.get("enabled"):
+                continue
+            x, y, bw, bh = self.box_rect(e, ox, oy, w, h)
+            if x <= px <= x + bw and y <= py <= y + bh:
+                return k
+        return None
+
+    def on_press(self, da, ev):
+        k = self.pick(ev.x, ev.y)
+        if k:
+            self.active = k
+            da.queue_draw()
+        return True
+
+    def on_release(self, da, ev):
+        self.active = None
+        da.queue_draw()
+        return True
+
+    def on_motion(self, da, ev):
+        if not self.active:
+            return True
+        ox, oy, w, h = self.preview_geom()
+        e = self.data.setdefault(self.active, {})
+        ex = max(0.0, min(1.0, (ev.x - ox) / w))
+        ey = max(0.0, min(1.0, (ev.y - oy) / h))
+        e["x"] = round(ex, 3)
+        e["y"] = round(ey, 3)
+        da.queue_draw()
+        return True
+
+    def on_apply(self, *a):
+        for k in KEYS:
+            e = self.data.setdefault(k, {})
+            e["enabled"] = bool(self.checks[k].get_active())
+            if k == "pet":
+                e["workspace"] = int(self.spins[k].get_value())
+        c = self.data.setdefault("cava", {})
+        c["enabled"] = bool(self.checks["cava"].get_active())
+        try:
+            with open(CFG, "w") as f:
+                json.dump({"v": 1, "widgets": self.data}, f, indent=2)
+        except OSError as ex:
+            print("save failed:", ex)
+            return
+        subprocess.Popen([os.path.expanduser("~/.local/bin/widgets-apply")])
+
+
+def main():
+    win = Manager()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()

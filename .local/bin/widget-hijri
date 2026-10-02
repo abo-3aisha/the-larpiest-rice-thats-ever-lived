@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+# Widget Hijri — Islamic (Hijri) date, computed offline (tabular calendar).
+import math
+import os
+import sys
+import time
+import i18n
+from datetime import date
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+from widget_lib import mkwin, one_instance
+
+pidf = one_instance("hijri")
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+
+MONTHS = ["Muharram", "Safar", "Rabi' I", "Rabi' II", "Jumada I", "Jumada II",
+          "Rajab", "Sha'ban", "Ramadan", "Shawwal", "Dhu l-Qa'da", "Dhu l-Hijja"]
+ISLAMIC_EPOCH = 1948440
+
+
+def gregorian_jdn(y, m, d):
+    a = (14 - m) // 12
+    y2 = y + 4800 - a
+    m2 = m + 12 * a - 3
+    return d + (153 * m2 + 2) // 5 + 365 * y2 + y2 // 4 - y2 // 100 + y2 // 400 - 32045
+
+
+def islamic_jdn(y, m, d):
+    return d + math.ceil(29.5 * (m - 1)) + (y - 1) * 354 + ((3 + 11 * y) // 30) \
+        + int(ISLAMIC_EPOCH) - 1
+
+
+def jdn_to_islamic(jd):
+    jd = math.floor(jd) + 0.5
+    year = math.floor((30 * (jd - ISLAMIC_EPOCH) + 10646) / 10631)
+    month = min(12, math.ceil((jd - (29 + islamic_jdn(year, 1, 1))) / 29.5) + 1)
+    day = int(jd - islamic_jdn(year, month, 1)) + 1
+    return day, month, year
+
+
+win, box = mkwin("hijri", """
+#htop { font-size: 16px; font-weight: bold; }
+#hbot { font-size: 11px; color: rgba(241,241,243,0.7); }
+""")
+
+top = Gtk.Label(label="...")
+top.set_name("htop")
+bot = Gtk.Label(label="...")
+bot.set_name("hbot")
+box.pack_start(top, True, True, 0)
+box.pack_start(bot, False, False, 0)
+
+
+def tick():
+    today = date.today()
+    jd = gregorian_jdn(today.year, today.month, today.day)
+    day, month, year = jdn_to_islamic(jd)
+    top.set_text("%d %s %d" % (day, MONTHS[month - 1], year))
+    bot.set_text(i18n.render("%A %d %B %Y"))
+    return True
+
+
+def on_destroy(*a):
+    try:
+        os.unlink(pidf)
+    except OSError:
+        pass
+    Gtk.main_quit()
+
+
+tick()
+GLib.timeout_add(60000, tick)
+win.connect("destroy", on_destroy)
+win.show_all()
+Gtk.main()
