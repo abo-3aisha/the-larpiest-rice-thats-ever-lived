@@ -110,7 +110,7 @@ float above the wallpaper but under every window and show on all workspaces.
 | `SUPER + K` | Discord drawer | Shows the `special:communication` workspace, launching Discord/Vesktop if needed |
 | `SUPER + ALT + K` | Hide Discord drawer | Toggles the drawer closed |
 
-### Screenshots
+### Screenshot keys
 
 | Keys | Action | Changes |
 |------|--------|---------|
@@ -149,6 +149,61 @@ All of these go through `fn-key`, which shows an OSD-style notification.
 |------|--------|---------|
 | `ALT + SHIFT` | Toggle US ⇄ Arabic | `grp:alt_shift_toggle` |
 | `SUPER + S → Language` | Choose language and layout | Sets `LANG` and `XKB` independently, live |
+
+---
+
+## Install
+
+```bash
+git clone https://github.com/abo-3aisha/the-larpiest-rice-thats-ever-lived
+cd the-larpiest-rice-thats-ever-lived
+./install.sh
+```
+
+That's the whole thing. The installer copies the config into `~/.config` and
+`~/.local`, rewrites every absolute path from `/home/abo3aisha` to your own
+home directory, then tells you what is still missing.
+
+```bash
+./install.sh --check      # show what it would do, change nothing
+./install.sh --force      # replace config files that already exist
+./install.sh --uninstall  # remove exactly what the installer put there
+```
+
+**It will not install packages for you.** It lists what is missing and prints
+the `pacman -S` line, but pulling 40 packages in behind your back is not
+something a dotfiles installer should do. You stay in charge of your machine.
+
+### Requirements
+
+Hyprland, `wofi`, `swaync`, `waybar`, `cava`, `mpvpaper`, `awww`, `grim`,
+`qt6ct`, `contour`, `kitty`, `python-gobject`, `gtk-layer-shell`, `wl-clipboard`,
+`cliphist`.
+
+Optional but nice: `wf-recorder` or `wl-screenrec` for screen recording,
+`cava` for the audio visualizer, `playerctl` for the music widget,
+`wireplumber` for the audio output switcher, `qrencode` for sharing Wi-Fi.
+
+### After installing
+
+1. Log out and back in so Hyprland reads the new files.
+2. `hyprctl reload` after any edit under `~/.config/hypr/`.
+3. The rice assumes a monitor called `eDP-1`. Run `hyprctl monitors` and edit
+   `~/.config/hypr/hyprland.lua` if yours is named differently.
+4. **The adhan defaults to Damascus** (`~/.config/prayer/times.conf`). Edit
+   `CITY` and the coordinates, or set `AUTO=0` to switch off the automatic
+   location lookup so it can't overwrite your choice.
+5. Acer Nitro AN515-57 owners only: `sudo ~/.local/bin/fix-kbd-backlight`, then
+   reboot. It installs a systemd hwdb entry so Fn+F9/F10 dim the keyboard
+   instead of the screen.
+
+### Portability notes
+
+The config files use absolute paths because Hyprland, waybar and swaync execute
+those strings literally — `$HOME` inside a waybar JSON value or a CSS `url()`
+is not expanded. The installer rewrites the username instead, which works for
+every file type. If you ever move your home directory, re-run
+`./install.sh --force`.
 
 ---
 
