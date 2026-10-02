@@ -413,11 +413,10 @@ class App:
             else:
                 w = Gtk.ComboBoxText()
                 opts = self.options(field, kind)
-                cur = str(p.get(field, 0))
                 for o in opts:
-                    w.append(o, self.T("PF_NEVER") if o == "0" and kind != "onoff"
-                             else (o if kind != "onoff" else o))
-                w.set_active(cur if cur in opts else 0)
+                    w.append(o, o if o != "0" else self.T("PF_NEVER"))
+                cur = str(p.get(field, 0))
+                w.set_active(cur if cur in opts else "0")
                 ctrls[field] = w
             g.attach(w, 1, i, 1, 1)
 
