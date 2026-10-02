@@ -103,6 +103,7 @@ class App:
         self.rows = []
         self.win = None
         self._syncing_list = False
+        self.editing = False      # locked onto one profile -> arrows edit it
         self.build()
 
     # ---------------------------------------------------------------- i18n --
@@ -126,6 +127,8 @@ class App:
                     padding: 3px 10px; }
         label.sel { background: %s; color: #101012; border-radius: 6px; }
         label.hint { font-size: 11px; color: #6f727a; }
+        label.head.locked { color: %s; font-weight: bold; }
+        label.head.dim { color: #4a4c52; }
         label.item { color: #d7d7dc; font-size: 13px; padding: 4px 10px; }
         label.itemsel { background: %s; color: #101012; border-radius: 6px;
                         font-weight: bold; }
@@ -178,6 +181,7 @@ class App:
         sc.set_max_content_height(128)
         sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sc.add(self.listbox)
+        self.h_list = h1
         # Clicking a profile has to select it. Without this the list was purely
         # decorative: paint() highlighted self.sel, nothing ever read a click
         # back, so Apply always applied whichever profile happened to be index 0
@@ -188,19 +192,22 @@ class App:
         pbtns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         for txt, fn, tip in (
                 (self.T("PF_CREATE"), self.on_create, self.T("PF_CREATE_TIP")),
-                (self.T("PF_EDIT"), self.on_edit, ""),
+                (self.T("PF_EDIT"), self.on_lock, self.T("PF_EDIT_TIP")),
                 (self.T("PF_DUPLICATE"), self.on_duplicate, ""),
                 (self.T("PF_RENAME"), self.on_rename, ""),
                 (self.T("PF_DELETE"), self.on_delete, self.T("PF_DELETE_TIP"))):
             b = Gtk.Button(label=txt)
             b.set_tooltip_text(tip)
             b.connect("clicked", fn)
+            if fn is self.on_lock:
+                self.btn_edit = b
             pbtns.pack_start(b, True, True, 0)
         root.add(pbtns)
 
         # ---- the selected profile's knobs ----------------------------
         h2 = Gtk.Label(label=self.T("PF_SETTINGS"), xalign=0.0)
         h2.get_style_context().add_class("head")
+        self.h_edit = h2
         root.add(h2)
 
         grid = Gtk.Grid(column_spacing=14, row_spacing=5)
@@ -217,6 +224,7 @@ class App:
 
         hint = Gtk.Label(label=self.T("PF_HINT"), xalign=0.0)
         hint.get_style_context().add_class("hint")
+        self.hint = hint
         root.add(hint)
 
         btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -301,6 +309,20 @@ class App:
         self.paint()
 
     def paint(self):
+        # When locked, the settings section is the live one: brighten the head
+        # and dim the profile list so it is obvious which half owns the arrows.
+        if self.editing:
+            self.h_edit.get_style_context().add_class("locked")
+            self.h_list.get_style_context().add_class("dim")
+        else:
+            self.h_edit.get_style_context().remove_class("locked")
+            self.h_list.get_style_context().remove_class("dim")
+        if hasattr(self, "btn_edit"):
+            self.btn_edit.set_label(self.T("PF_EDIT_DONE") if self.editing
+                                    else self.T("PF_EDIT"))
+        if hasattr(self, "hint"):
+            self.hint.set_text(self.T("PF_HINT_LOCKED") if self.editing
+                               else self.T("PF_HINT_FREE"))
         for i, (_f, _k, name, val) in enumerate(self.rows):
             val.set_text(self.value(_f, _k))
             for lbl in (name, val):
@@ -375,75 +397,22 @@ class App:
         rp.save(self.profiles)
         self.rebuild()
 
-    def on_edit(self, *a):
-        """Full editor for the selected profile: name + every knob as a real
-        control. Left/Right on the rows below already edits values, but it is
-        invisible until you press an arrow, which is why the window looked
-        read-only. This is the discoverable way in."""
-        p = self.p
-        d = Gtk.Dialog(title=self.T("PF_EDIT"), parent=self.win, modal=True)
-        d.add_buttons(self.T("LT_CANCEL"), Gtk.ResponseType.CANCEL,
-                      self.T("PF_OK"), Gtk.ResponseType.OK)
-        d.set_default_response(Gtk.ResponseType.OK)
-        box = d.get_content_area()
-        box.set_spacing(8)
-        box.set_border_width(16)
+    # ------------------------------------------------------------- locking --
+    # Editing a profile and switching between profiles used to fight over the
+    # same arrow keys, and the way out was a modal dialog nobody could find.
+    # Edit now LOCKS onto the highlighted profile instead: the list stops
+    # responding to Up/Down and the arrows move between that profile's settings
+    # only, so a setting cannot be changed on one profile and applied to
+    # another. Esc unlocks.
+    def on_lock(self, *a):
+        self.editing = not self.editing
+        if self.editing:
+            self.row = 0
+        self.paint()
 
-        name = Gtk.Entry()
-        name.set_text(p["name"])
-        if p.get("builtin"):
-            # built-ins keep their identity: the name is what load() matches on
-            # to avoid re-adding them, so it is shown but not editable
-            name.set_editable(False)
-            name.set_sensitive(False)
-        g = Gtk.Grid(column_spacing=14, row_spacing=7)
-        g.set_margin_top(8)
-        box.pack_start(name, False, False, 0)
-        box.pack_start(g, False, False, 0)
-
-        ctrls = {}
-        for i, (key, field, kind) in enumerate(ROWS):
-            lbl = Gtk.Label(label=self.T(key), xalign=0.0)
-            g.attach(lbl, 0, i, 1, 1)
-            if kind == "onoff":
-                w = Gtk.Switch()
-                w.set_active(str(p.get(field, 0)) == "1")
-                w.set_halign(Gtk.Align.START)
-                ctrls[field] = w
-            else:
-                w = Gtk.ComboBoxText()
-                opts = self.options(field, kind)
-                for o in opts:
-                    w.append(o, o if o != "0" else self.T("PF_NEVER"))
-                cur = str(p.get(field, 0))
-                w.set_active(cur if cur in opts else "0")
-                ctrls[field] = w
-            g.attach(w, 1, i, 1, 1)
-
-        d.show_all()
-        r = d.run()
-        if r == Gtk.ResponseType.OK:
-            if not p.get("builtin"):
-                newname = name.get_text().strip()
-                if newname:
-                    p["name"] = rp.unique_name(
-                        [x for x in self.profiles if x is not p], newname)
-            for field, w in ctrls.items():
-                if isinstance(w, Gtk.Switch):
-                    p[field] = 1 if w.get_active() else 0
-                else:
-                    p[field] = int(w.get_active_id())
-            # a profile that no longer runs anything is a saver, and perf-mode
-            # only knows two modes -- keep MODE honest so status cannot lie
-            if not any(int(p.get(f, 0)) for f in
-                       ("ANIMATIONS", "BLUR", "CAVA", "WIDGETS")):
-                p["MODE"] = "saver"
-            else:
-                p["MODE"] = "balanced"
-            self.names = [x["name"] for x in self.profiles]
-            rp.save(self.profiles)
-            self.rebuild()
-        d.destroy()
+    def on_rename_locked(self, *a):
+        self.on_rename()
+        self.editing = False
 
     def ask(self, title, initial=""):
         d = Gtk.Dialog(title=title, parent=self.win, modal=True)
@@ -464,15 +433,10 @@ class App:
     def on_key(self, _w, ev):
         k = ev.keyval
         nprof = len(self.profiles)
-        # Up/Down walk the PROFILES. That is the thing the user comes here to
-        # switch, and it was the broken one: Up/Down used to move the settings
-        # cursor instead, so picking a profile with the arrow keys and pressing
-        # Enter applied Balanced every single time. Settings rows moved to
-        # Shift+Up / Shift+Down, Left/Right still cycle the focused row's value,
-        # and Tab stays as an alias for profile switching.
-        shift = bool(ev.state & Gdk.ModifierType.SHIFT_MASK)
+        # Locked onto a profile: the arrows belong to that profile's settings
+        # and the profile list is frozen. Unlocked: they walk the profiles.
         if k in (Gdk.KEY_Down,):
-            if shift:
+            if self.editing:
                 self.row = (self.row + 1) % len(self.rows)
             else:
                 self.sel = (self.sel + 1) % nprof
@@ -481,7 +445,7 @@ class App:
             self.paint()
             return True
         if k in (Gdk.KEY_Up,):
-            if shift:
+            if self.editing:
                 self.row = (self.row - 1) % len(self.rows)
             else:
                 self.sel = (self.sel - 1) % nprof
@@ -490,28 +454,41 @@ class App:
             self.paint()
             return True
         if k == Gdk.KEY_Right:
-            self.cycle(1)
+            if self.editing:
+                self.cycle(1)
             return True
         if k == Gdk.KEY_Left:
-            self.cycle(-1)
+            if self.editing:
+                self.cycle(-1)
             return True
         if k in (Gdk.KEY_Tab,):
-            self.sel = (self.sel + 1) % nprof
-            self.row = 0
-            self.fill_list()
-            self.paint()
+            if not self.editing:
+                self.sel = (self.sel + 1) % nprof
+                self.row = 0
+                self.fill_list()
+                self.paint()
             return True
         if k in (Gdk.KEY_ISO_Left_Tab,):
-            self.sel = (self.sel - 1) % nprof
-            self.row = 0
-            self.fill_list()
-            self.paint()
+            if not self.editing:
+                self.sel = (self.sel - 1) % nprof
+                self.row = 0
+                self.fill_list()
+                self.paint()
+            return True
+        if k == Gdk.KEY_E:
+            self.on_lock()
             return True
         if k in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space):
             self.apply()
             return True
         if k == Gdk.KEY_Escape:
-            self.win.destroy()
+            # Esc unlocks before it closes, otherwise a locked window could
+            # only be left by clicking Cancel.
+            if self.editing:
+                self.editing = False
+                self.paint()
+            else:
+                self.win.destroy()
             return True
         return False
 
