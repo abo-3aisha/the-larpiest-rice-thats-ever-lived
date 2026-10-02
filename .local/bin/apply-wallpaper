@@ -186,6 +186,24 @@ if command -v awww >/dev/null 2>&1 && [ -f "$still" ]; then
             sleep 0.5
             start_mpvpaper "$conv" || say "mpvpaper failed to start"
         }
+        # awww keeps painting its last frame once the transition ends, and it
+        # renders ON TOP of mpvpaper, so the video would sit there looking like
+        # a still image. The two daemons cannot share the output -- only one may
+        # own it -- so the moment mpvpaper is alive we take awww out.
+        if pgrep -x mpvpaper >/dev/null 2>&1; then
+            sleep 0.4
+            pkill -x awww-daemon 2>/dev/null
+            sleep 0.3
+            # If mpvpaper died during the handover, put awww back so the user is
+            # never left with no wallpaper at all.
+            pgrep -x mpvpaper >/dev/null 2>&1 || {
+                awww-daemon >/dev/null 2>&1 &
+                sleep 0.5
+                awww img "$still" --resize crop -o "$mon" >> "$LOG" 2>&1
+                say "mpvpaper died; wallpaper restored as a still"
+            }
+            log "handed output to mpvpaper (awww stopped)"
+        fi
     fi
 elif [ "$is_video" -eq 0 ]; then
     # No awww: these cannot animate, so the video layer is simply dropped.

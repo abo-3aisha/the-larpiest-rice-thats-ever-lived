@@ -1397,10 +1397,42 @@ def _gi_usable():
         return False
 
 
+def _read_envd_locale():
+    """LANG/LANGUAGE/LC_TIME as written by language-and-time into
+    environment.d. Returns {} when the file is absent."""
+    try:
+        out = {}
+        for line in (Path(HOME) / ".config" / "environment.d" /
+                     "10-rice-locale.conf").read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, _, v = line.partition("=")
+                out[k.strip()] = v.strip()
+        return out
+    except Exception:
+        return {}
+
+
+def reapply_locale():
+    """A `hyprctl reload` rebuilds the compositor environment from the config
+    file. None of the hl.env() calls set LANG, so every reload silently threw
+    the interface language back to whatever the session was logged in with --
+    English. That is why the language "reverted by itself", usually right
+    after a wallpaper change, because every wallpaper change calls reload().
+    Re-apply the stored locale so a reload is safe."""
+    loc = _read_envd_locale()
+    if not loc.get("LANG") or not shutil.which("hyprctl"):
+        return
+    for k in ("LANG", "LANGUAGE", "LC_TIME"):
+        if loc.get(k):
+            subprocess.run(["hyprctl", "keyword", "env", f"{k},{loc[k]}"],
+                           capture_output=True)
+
+
 def reload():
     live = bool(shutil.which("hyprctl"))
     if live:
         subprocess.run(["hyprctl", "reload"], capture_output=True)
+        reapply_locale()
     if shutil.which("swaync-client"):
         subprocess.run(["swaync-client", "-R"], capture_output=True)
         subprocess.run(["swaync-client", "-rs"], capture_output=True)  # style must reload too

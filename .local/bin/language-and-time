@@ -748,6 +748,11 @@ class App:
         #    resets the ACTIVE layout index to 0, so setting it before the
         #    reload silently threw the user back to the first language.
         run("hyprctl reload")
+        # The reload rebuilds Hyprland's environment from the config, and the
+        # config has no LANG, so the compositor fell back to the login value
+        # (English) until the next login. Push the locale back in.
+        for kv in (("LANG", loc), ("LANGUAGE", loc.split("_")[0]), ("LC_TIME", loc)):
+            run("hyprctl keyword env %s,%s" % kv)
         run("hyprctl keyword input:kb_layout '%s'" % lay)
         run("hyprctl keyword input:kb_options '%s'" % self.d["TOGGLE"])
         # Read back what Hyprland really accepted. A layout it cannot parse is
