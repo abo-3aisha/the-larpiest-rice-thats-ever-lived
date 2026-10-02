@@ -6,6 +6,48 @@ local HOME = (os and os.getenv and os.getenv("HOME")) or "/home/abo3aisha"
 
 local ok_theme = pcall(dofile, HOME .. "/.config/hypr/theme.lua")
 
+-- Performance profile written by ~/.local/bin/perf-mode (animations + blur).
+-- Missing on a fresh install / before the app is ever opened — hence pcall,
+-- exactly like the theme above. Must come BEFORE the hl.config blocks below
+-- so the values land in the config that actually takes effect.
+pcall(dofile, HOME .. "/.config/rice/perf.lua")
+
+-- Interface locale + keyboard layout, written by ~/.local/bin/language-and-time
+-- into ~/.config/rice/i18n.conf.
+--
+-- These used to be hardcoded here (kb_layout = "us,ara") and pushed at runtime
+-- with `hyprctl keyword`, which this Hyprland refuses: it answers "keyword
+-- can't work with non-legacy parsers. Use eval." `hyprctl setvar` does not
+-- exist at all on 0.5.1, and hyprctl eval is for layout dispatch, not config.
+-- So the config file is the only way in -- and that is the more robust place
+-- anyway: a reload now re-applies the language and the layout automatically,
+-- instead of quietly dropping both back to English / US.
+local RICE_I18N = HOME .. "/.config/rice/i18n.conf"
+local rice_i18n = {}
+do
+    local fh = io.open(RICE_I18N, "r")
+    if fh then
+        for line in fh:lines() do
+            local k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
+            if k and not k:match("^#") then rice_i18n[k] = v:gsub('"', "") end
+        end
+        fh:close()
+    end
+end
+
+-- Locale code (ar_SY.UTF-8) -> the layout xkb name (ara). Hyprland wants the
+-- bare layout in kb_layout but the full locale in env.
+local function rice_locale_to_layout(loc)
+    if not loc or loc == "" then return nil end
+    return (loc:match("^([%a_]+)") or loc):lower()
+end
+
+if rice_i18n.LANG and rice_i18n.LANG ~= "" then
+    hl.env("LANG", rice_i18n.LANG)
+    hl.env("LANGUAGE", (rice_i18n.LANG:match("^([%a_]+)"):gsub("_", "-")))
+    hl.env("LC_TIME", rice_i18n.LANG)
+end
+
 if not ok_theme or not THEME then
     THEME = {
         mode = "dark",
@@ -77,6 +119,10 @@ hl.on("hyprland.start", function()
 
     -- Material-You theme engine (applies current wallpaper palette + watches changes)
     hl.exec_cmd("sh -c 'setsid python3 $HOME/.config/hypr/themes/palette.py --watch >/tmp/palette.log 2>&1 &'")
+
+    -- Idle timer for the performance profile (a no-op until TIMER > 0 in
+    -- ~/.config/rice/perf.conf, so it costs nothing on a fresh install)
+    hl.exec_cmd("sh -c 'setsid $HOME/.local/bin/perf-mode watch >/dev/null 2>&1 &'")
 end)
 
 
@@ -215,8 +261,12 @@ hl.config({
 
 hl.config({
     input = {
-        kb_layout  = "us,ara",
-        kb_options = "grp:alt_shift_toggle",
+        -- Read from i18n.conf (INPUT / TOGGLE) instead of being hardcoded, so
+        -- choosing a different keyboard layout in the control centre survives
+        -- the reload it triggers. Falls back to the previous values when the
+        -- file is missing on a fresh install.
+        kb_layout  = rice_i18n.INPUT or "us,ara",
+        kb_options = rice_i18n.TOGGLE or "grp:alt_shift_toggle",
         follow_mouse = 1,
         sensitivity = 0,
         touchpad = {
@@ -244,6 +294,18 @@ hl.window_rule({ match = { class = "mpv|vlc|celluloid|motion|mkvtoolnix-gui" }, 
 hl.window_rule({ match = { class = "steam|steam_app_|steamwebhelper|gamescope|.*%.exe" }, no_blur = true, opaque = true, idle_inhibit = "always" })
 hl.window_rule({ match = { fullscreen = true }, no_blur = true, opaque = true })
 
+-- Terminals are translucent so the wallpaper reads through them the way foot
+-- did. Contour and kitty cannot blur their own backdrop on Linux, so the
+-- translucency is what matters here: with no blur, the raw wallpaper shows
+-- through instead of a smeared copy, which keeps the text far more readable
+-- than a blurred backdrop ever did. Blur for a normal window is a compositor
+-- rule HyprMod's window_rule API has never been seen to accept, and one
+-- rejected key silently takes every other rule with it, so it is not used.
+hl.window_rule({ match = { class = "contour" }, rounding = 0 })
+hl.window_rule({ match = { class = "kitty" },    rounding = 0 })
+hl.window_rule({ match = { class = "foot" },     rounding = 0 })
+hl.window_rule({ match = { class = "ghostty" },  rounding = 0 })
+
 -- === NOW PLAYING PANEL (top dropdown bar) ===
 
 hl.window_rule({ match = { class = "nowpanel" }, float = true, size = "1160 300", move = "(monitor_w-1160)*0.5 (monitor_h-300)*0.5", rounding = 18, border_size = 1 })
@@ -269,12 +331,12 @@ hl.bind("CTRL + PRINT",          hl.dsp.exec_cmd(shot .. " output"))
 -- === ESSENTIAL APPS ===
 
 hl.bind(mainMod .. " + SPACE",  hl.dsp.exec_cmd("wofi --show drun"))
-hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd("contour"))
-hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("wezterm"))
-hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("thunar"))
+hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd("sh -c 'for c in kitty contour ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
+hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("sh -c 'for c in contour kitty ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
+hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("dolphin"))
 hl.bind(mainMod .. " + B",          hl.dsp.exec_cmd("cycle-power"))
 hl.bind(mainMod .. " + SHIFT + B", hl.dsp.exec_cmd("firefox"))
-hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd("contour"))
+hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd("sh -c 'for c in kitty contour ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
 
 -- === WINDOW MANAGEMENT ===
 
