@@ -226,16 +226,6 @@ every file type. If you ever move your home directory, re-run
 - All UI strings and shortcut labels in this rice are intentionally **English**.
 - No secrets in this repo.
 
-## Learn how this was built
-
-`build-a-rice.html` is a self-contained, mobile-friendly guide (in Arabic) to
-how this rice actually works — the single theme engine, the wallpaper pipeline,
-four repeatable recipes, the twelve real traps that cost me hours, and ten
-hands-on exercises with progress saved in the browser. No internet needed.
-
-Open it in any browser. On a phone, the **A− / A+** buttons at the bottom resize
-the text.
-
 ## Credits
 
 The locking keyboard, the candy shell and the Miku cat are all
