@@ -188,6 +188,7 @@ class App:
         pbtns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         for txt, fn, tip in (
                 (self.T("PF_CREATE"), self.on_create, self.T("PF_CREATE_TIP")),
+                (self.T("PF_EDIT"), self.on_edit, ""),
                 (self.T("PF_DUPLICATE"), self.on_duplicate, ""),
                 (self.T("PF_RENAME"), self.on_rename, ""),
                 (self.T("PF_DELETE"), self.on_delete, self.T("PF_DELETE_TIP"))):
@@ -373,6 +374,77 @@ class App:
         self.sel = min(self.sel, len(self.profiles) - 1)
         rp.save(self.profiles)
         self.rebuild()
+
+    def on_edit(self, *a):
+        """Full editor for the selected profile: name + every knob as a real
+        control. Left/Right on the rows below already edits values, but it is
+        invisible until you press an arrow, which is why the window looked
+        read-only. This is the discoverable way in."""
+        p = self.p
+        d = Gtk.Dialog(title=self.T("PF_EDIT"), parent=self.win, modal=True)
+        d.add_buttons(self.T("LT_CANCEL"), Gtk.ResponseType.CANCEL,
+                      self.T("PF_OK"), Gtk.ResponseType.OK)
+        d.set_default_response(Gtk.ResponseType.OK)
+        box = d.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(16)
+
+        name = Gtk.Entry()
+        name.set_text(p["name"])
+        if p.get("builtin"):
+            # built-ins keep their identity: the name is what load() matches on
+            # to avoid re-adding them, so it is shown but not editable
+            name.set_editable(False)
+            name.set_sensitive(False)
+        g = Gtk.Grid(column_spacing=14, row_spacing=7)
+        g.set_margin_top(8)
+        box.pack_start(name, False, False, 0)
+        box.pack_start(g, False, False, 0)
+
+        ctrls = {}
+        for i, (key, field, kind) in enumerate(ROWS):
+            lbl = Gtk.Label(label=self.T(key), xalign=0.0)
+            g.attach(lbl, 0, i, 1, 1)
+            if kind == "onoff":
+                w = Gtk.Switch()
+                w.set_active(str(p.get(field, 0)) == "1")
+                w.set_halign(Gtk.Align.START)
+                ctrls[field] = w
+            else:
+                w = Gtk.ComboBoxText()
+                opts = self.options(field, kind)
+                cur = str(p.get(field, 0))
+                for o in opts:
+                    w.append(o, self.T("PF_NEVER") if o == "0" and kind != "onoff"
+                             else (o if kind != "onoff" else o))
+                w.set_active(cur if cur in opts else 0)
+                ctrls[field] = w
+            g.attach(w, 1, i, 1, 1)
+
+        d.show_all()
+        r = d.run()
+        if r == Gtk.ResponseType.OK:
+            if not p.get("builtin"):
+                newname = name.get_text().strip()
+                if newname:
+                    p["name"] = rp.unique_name(
+                        [x for x in self.profiles if x is not p], newname)
+            for field, w in ctrls.items():
+                if isinstance(w, Gtk.Switch):
+                    p[field] = 1 if w.get_active() else 0
+                else:
+                    p[field] = int(w.get_active_id())
+            # a profile that no longer runs anything is a saver, and perf-mode
+            # only knows two modes -- keep MODE honest so status cannot lie
+            if not any(int(p.get(f, 0)) for f in
+                       ("ANIMATIONS", "BLUR", "CAVA", "WIDGETS")):
+                p["MODE"] = "saver"
+            else:
+                p["MODE"] = "balanced"
+            self.names = [x["name"] for x in self.profiles]
+            rp.save(self.profiles)
+            self.rebuild()
+        d.destroy()
 
     def ask(self, title, initial=""):
         d = Gtk.Dialog(title=title, parent=self.win, modal=True)

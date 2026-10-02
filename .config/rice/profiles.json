@@ -1,13 +1,25 @@
 {
-  "active": "Balanced",
+  "active": "Normal",
   "profiles": [
+    {
+      "ANIMATIONS": 1,
+      "BLUR": 1,
+      "CAVA": 1,
+      "WIDGETS": 1,
+      "TIMER": 15,
+      "IDLE_SCREEN": 0,
+      "LOGIN_ONLY": 0,
+      "MODE": "balanced",
+      "name": "Normal",
+      "builtin": true
+    },
     {
       "name": "Balanced",
       "builtin": true,
       "ANIMATIONS": 1,
       "BLUR": 1,
-      "CAVA": 1,
-      "WIDGETS": 1,
+      "CAVA": 0,
+      "WIDGETS": 0,
       "TIMER": 15,
       "IDLE_SCREEN": 0,
       "LOGIN_ONLY": 0,
