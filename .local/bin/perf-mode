@@ -74,6 +74,9 @@ hl.config({
 EOF
 
     # the two 60fps / always-on layer surfaces
+    # Both directions matter. Only starting them meant a profile that turned
+    # cava or the widgets OFF did nothing at all, because whatever was already
+    # running just kept running.
     local want_cava=0 want_widgets=0
     if [ "$saver" = 1 ]; then
         pkill -f cava-dock >/dev/null 2>&1
@@ -86,8 +89,15 @@ EOF
                 rm -f "$HOME/.cache/cava-dock.pid" 2>/dev/null
                 (setsid "$B/cava-dock" >/dev/null 2>&1 &)
             }
+        else
+            pkill -f cava-dock >/dev/null 2>&1
+            rm -f "$HOME/.cache/cava-dock.pid" 2>/dev/null
         fi
-        [ "$want_widgets" = 1 ] && "$B/widgets-apply" >/dev/null 2>&1
+        if [ "$want_widgets" = 1 ]; then
+            "$B/widgets-apply" >/dev/null 2>&1
+        else
+            pkill -f 'widget-(clockana|clock|music|sys|miku|prayer|hijri)' >/dev/null 2>&1
+        fi
     fi
 
     # ---- the Samsung-style "one frame" step -------------------------------
@@ -115,8 +125,13 @@ EOF
     fi
 
     setv MODE $([ "$saver" = 1 ] && echo saver || echo balanced)
-    [ "$saver" = 1 ] && notify "$T_PM_SAVER_DESC" \
-                     || notify "$T_PM_BALANCED_DESC"
+    # The Performance app already announces the real profile name. Without this
+    # guard every profile answered with "balanced", because apply_saver only
+    # knows two states and the app is the one that knows which profile was picked.
+    if [ "${RICE_PERF_QUIET:-0}" != "1" ]; then
+        [ "$saver" = 1 ] && notify "$T_PM_SAVER_DESC" \
+                         || notify "$T_PM_BALANCED_DESC"
+    fi
     return 0
 }
 

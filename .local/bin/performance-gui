@@ -410,7 +410,9 @@ class App:
     def apply(self):
         rp.save(self.profiles, self.p["name"])
         rp.write_perf_conf(self.p)
-        run("%s off" % PERF)          # pushes animations/blur/cava/widgets
+        # RICE_PERF_QUIET stops perf-mode from answering "balanced" behind our
+        # back -- it only knows two states, we know which profile was picked.
+        run("RICE_PERF_QUIET=1 %s off" % PERF)   # pushes anim/blur/cava/widgets
         run("pkill -f 'perf-mode watch' >/dev/null 2>&1")
         if str(self.p.get("TIMER", 0)) != "0":
             run("(setsid %s watch >/dev/null 2>&1 &)" % PERF)

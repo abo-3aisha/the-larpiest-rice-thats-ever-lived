@@ -19,17 +19,19 @@ FIELDS = ("ANIMATIONS", "BLUR", "CAVA", "WIDGETS",
           "TIMER", "IDLE_SCREEN", "LOGIN_ONLY")
 
 BUILTIN = [
-    # name          anim blur cava wid  timer screen login
-    ("Balanced",     1,   1,    1,   1,    15,    0,     0),
-    ("Saver",        0,   0,    0,   0,     2,    2,     0),
-    ("Gaming",       1,   0,    0,   0,     0,    0,     0),
+    # name          anim blur cava wid  timer screen login   mode
+    ("Balanced",     1,   1,    1,   1,    15,    0,     0, "balanced"),
+    ("Saver",        0,   0,    0,   0,     2,    2,     0, "saver"),
+    ("Gaming",       1,   0,    0,   0,     0,    0,     0, "balanced"),
 ]
 
 
-def _mk(name, anim, blur, cava, wid, timer, screen, login, builtin=True):
+def _mk(name, anim, blur, cava, wid, timer, screen, login, builtin=True,
+        mode="balanced"):
     return {
         "name": name,
         "builtin": builtin,
+        "MODE": mode,
         "ANIMATIONS": anim, "BLUR": blur, "CAVA": cava, "WIDGETS": wid,
         "TIMER": timer, "IDLE_SCREEN": screen, "LOGIN_ONLY": login,
     }
@@ -55,8 +57,14 @@ def load():
             profs.append(_mk(*b))
     for p in profs:
         p.setdefault("builtin", False)
+        p.setdefault("MODE", "balanced")
         for f in FIELDS:
             p.setdefault(f, 0)
+        # A profile whose numbers say "saver" must not claim to be balanced, or
+        # perf-mode/status lies about what is actually running.
+        if not p.get("ANIMATIONS") and not p.get("BLUR") and not p.get("CAVA") \
+                and not p.get("WIDGETS"):
+            p["MODE"] = "saver"
     return profs
 
 
@@ -94,7 +102,9 @@ def write_perf_conf(p):
     with open(PERF_CONF, "w", encoding="utf-8") as fh:
         fh.write("# rice: performance profile — from the Performance app\n")
         fh.write("PROFILE=%s\n" % p["name"])
-        fh.write("MODE=balanced\n")
+        # Was hardcoded to "balanced" for every profile, which is why the status
+        # and the notification could never agree with what the user picked.
+        fh.write("MODE=%s\n" % p.get("MODE", "balanced"))
         for f in ("ANIMATIONS", "BLUR", "CAVA", "WIDGETS", "TIMER",
                   "IDLE_SCREEN", "LOGIN_ONLY", "AUTO"):
             fh.write("%s=%s\n" % (f, p.get(f, 0) if f != "AUTO" else 1))
