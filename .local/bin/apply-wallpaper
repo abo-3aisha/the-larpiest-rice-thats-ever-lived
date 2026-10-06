@@ -45,7 +45,7 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 # --------------------------------------------------------------------------
 path="${1:-}"
 if [ -z "$path" ]; then
-    path=$(sed -n 's/^wallpaper *= *[^,]*,//p' "$CONF" 2>/dev/null | head -1)
+    path=$(sed -n 's/^wallpaper *= *[^,]*, *//p' "$CONF" 2>/dev/null | head -1)
 fi
 [ -n "$path" ] && [ -f "$path" ] || { log "no usable target"; exit 0; }
 path=$(readlink -f -- "$path" 2>/dev/null || printf '%s' "$path")
@@ -110,10 +110,34 @@ convert_for_wallpaper() {
 start_mpvpaper() {
     local rt="${XDG_RUNTIME_DIR:-/tmp}"
     rm -f "$rt/mpvpaper.socket" "$rt/mpvpaper0.socket" 2>/dev/null
-    mpvpaper -f -p -a FULL -o "no-audio --loop-playlist --hwdec=auto-safe" \
-        "$mon" "$1" >> "$LOG" 2>&1
+    # stdin </dev/null: when apply-wallpaper runs inside a terminal (manual run
+    # or a hyprctl reload hook from the prompt), mpvpaper inherits that tty and
+    # a background read of it = SIGTTIN = process frozen in state T by itself.
+    # NO -p/-a FULL: those mean --auto-pause/--auto-mode FULL — mpvpaper pauses
+    # playback by itself whenever ANY fullscreen window exists (man 1.9), which
+    # is exactly the "SIGCONT says resumed but the picture stays frozen" bug.
+    mpvpaper -f -o "no-audio --loop-playlist --hwdec=auto-safe" \
+        "$mon" "$1" >> "$LOG" 2>&1 < /dev/null
     sleep 0.5
     pgrep -x mpvpaper >/dev/null 2>&1
+}
+
+# stop_mpvpaper — SUPER+P freezes mpvpaper with SIGSTOP (exact-frame pause) and
+# a stopped process never receives SIGTERM, so killall alone silently fails and
+# the frozen frame keeps owning the output. Wake it first, then kill. Verified:
+# the log shows a 00:47-born instance SURVIVING the 00:53 and 00:57 switches
+# (age stayed 17min), so a plain `killall` can race/miss — escalate to KILL
+# before the health check below, or pgrep finds the OLD process and falsely
+# reports the new one started.
+stop_mpvpaper() {
+    killall -CONT mpvpaper 2>/dev/null
+    killall mpvpaper 2>/dev/null
+    for _ in 1 2 3 4 5; do
+        pgrep -x mpvpaper >/dev/null 2>&1 || return 0
+        sleep 0.2
+    done
+    killall -9 mpvpaper 2>/dev/null
+    sleep 0.3
 }
 
 # ==========================================================================
@@ -167,9 +191,9 @@ if command -v awww >/dev/null 2>&1 && [ -f "$still" ]; then
         log "restoring base frame under the video"
         awww img "$handoff_base" --resize crop -o "$mon" >> "$LOG" 2>&1
         sleep 0.1
-        killall mpvpaper 2>/dev/null
+        stop_mpvpaper
     else
-        killall mpvpaper 2>/dev/null
+        stop_mpvpaper
     fi
 
     awww img "$still" --resize crop -o "$mon" \
@@ -207,7 +231,7 @@ if command -v awww >/dev/null 2>&1 && [ -f "$still" ]; then
     fi
 elif [ "$is_video" -eq 0 ]; then
     # No awww: these cannot animate, so the video layer is simply dropped.
-    killall mpvpaper 2>/dev/null
+    stop_mpvpaper
     if command -v swww >/dev/null 2>&1; then
         swww-daemon >/dev/null 2>&1 &
         swww img "$still" --resize fill --outputs "$mon" \

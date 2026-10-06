@@ -14,6 +14,28 @@ CFG = os.path.expanduser("~/.config/widgets/widgets.json")
 BIN = os.path.expanduser("~/.local/bin")
 RULES = os.path.expanduser("~/.cache/widgets-rules.json")
 GEOM = os.path.expanduser("~/.cache/widgets-geom.json")
+PERF = os.path.expanduser("~/.config/rice/perf.conf")
+
+
+def perf_allows(key):
+    """The Performance app (perf.conf) is a MASTER switch: it pkills these
+    processes but never edits widgets.json — without honoring it here, every
+    wallpaper change (palette.py -> widgets-apply --force-restart) would
+    resurrect widgets/cava the user turned off in Performance. saver always
+    blocks; otherwise the per-feature toggle (WIDGETS/CAVA, default 1) decides.
+    OFF anywhere = off (both switches must allow spawning)."""
+    try:
+        kv = {}
+        for line in open(PERF):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                kv[k] = v
+    except OSError:
+        return True
+    if kv.get("MODE") == "saver":
+        return False
+    return kv.get(key, "1") == "1"
 
 TITLES = {
     "clock": "^Widget Clock$",
@@ -123,7 +145,7 @@ def main():
                 hypr("unset," + old)
         stored = [r for r in stored if "title:%s" % title not in r]
 
-        if not enabled:
+        if not enabled or not perf_allows("WIDGETS"):
             kill_by(pat)
             geom[key] = None
             continue
@@ -162,7 +184,7 @@ def main():
 
     # cava: global bottom strip, toggled on/off only
     ce = cfg.get("cava", {})
-    if ce.get("enabled"):
+    if ce.get("enabled") and perf_allows("CAVA"):
         if not is_running("cava-dock"):
             spawn(os.path.join(BIN, "cava-dock"), "cava")
     else:

@@ -542,14 +542,24 @@ SWAYNC_CSS = """* {{
 
 .control-center {{
     background: {cc_bg};
-    border: 1px solid #{accent}44;
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+    border: 1px solid rgba(255,255,255,0.10);
     border-radius: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                0 0 0 1px rgba(255,255,255,0.05),
+                0 14px 36px rgba(0,0,0,0.38),
+                0 0 16px rgba({accent_rgb}, 0.10);
 }}
 
 .notification-window {{
-    background: #{bg};
-    border: 1px solid #{accent}44;
+    background: {cc_bg};
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+    border: 1px solid rgba(255,255,255,0.10);
     border-radius: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                0 0 0 1px rgba(255,255,255,0.05),
+                0 10px 28px rgba(0,0,0,0.34),
+                0 0 16px rgba({accent_rgb}, 0.10);
 }}
 
 .widget-title {{
@@ -567,9 +577,15 @@ SWAYNC_CSS = """* {{
 
 .notification {{
     background: #{surface};
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
     border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.06);
     padding: 8px 12px;
     color: #{fg};
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22),
+                0 0 0 1px rgba(255,255,255,0.04),
+                0 4px 14px rgba(0,0,0,0.26),
+                0 0 10px rgba({accent_rgb}, 0.08);
 }}
 
 .notification-content {{
@@ -699,8 +715,13 @@ SWAYNC_CSS = """* {{
 
 WOFI_CSS = """window {{
     background-color: rgba(20, 20, 23, 0.62);
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
     border-radius: 18px;
-    border: 1px solid rgba({accent_rgb}, 0.40);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                0 0 0 1px rgba(255,255,255,0.05),
+                0 12px 34px rgba(0,0,0,0.40),
+                0 0 16px rgba({accent_rgb}, 0.10);
 }}
 
 #outer-box {{
@@ -710,10 +731,12 @@ WOFI_CSS = """window {{
 
 #input {{
     background-color: #2a2a30;
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.0) 40%);
     color: #eff1f4;
     border: 1px solid rgba({accent_rgb}, 0.53);
     border-radius: 10px;
     padding: 8px 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
 }}
 
 #input:focus {{
@@ -1449,6 +1472,17 @@ def reload():
                 enabled = bool(data.get("cava", {}).get("enabled", True))
             except Exception:
                 pass
+        # The Performance app's master switch pkills cava-dock but never
+        # writes widgets.json — honor it or every wallpaper change would
+        # resurrect the EQ strip the user turned off in Performance.
+        try:
+            pconf = Path(HOME, ".config", "rice", "perf.conf")
+            kv = dict(l.strip().split("=", 1) for l in pconf.read_text().splitlines()
+                      if "=" in l and not l.startswith("#"))
+            if kv.get("MODE") == "saver" or kv.get("CAVA", "1") != "1":
+                enabled = False
+        except OSError:
+            pass
         if not enabled:
             subprocess.run(["pkill", "-f", "cava-dock"], capture_output=True)
         elif not _gi_usable():
@@ -1476,11 +1510,39 @@ def reload():
               "alone (run palette.py from your own terminal to re-tint them)")
 
 
+STATE = HOME + "/.cache/palette-state"
+WALL_LOCK = HOME + "/.cache/.wallpaper.lock"
+
+
+def _read_state():
+    try:
+        lines = Path(STATE).read_text().splitlines()
+        if len(lines) >= 2 and lines[0] and lines[1]:
+            return lines[0], lines[1]
+    except Exception:
+        pass
+    return None, None
+
+
+def _write_state(wallpaper, accent):
+    try:
+        Path(STATE).parent.mkdir(parents=True, exist_ok=True)
+        Path(STATE).write_text("%s\n%s\n" % (wallpaper, accent))
+    except Exception:
+        pass
+
+
 def apply(wallpaper, do_reload):
     theme = build_palette(wallpaper)
     generate(theme)
     if do_reload:
         reload()
+        # Marker for the --watch daemon: this wallpaper was generated AND
+        # reloaded already, so it must not fire a second identical restart.
+        # Record what the daemon reads back (hyprpaper.conf) rather than the
+        # --wall argument: on video wallpapers those differ (extracted frame
+        # vs the converted mp4) and the daemon would never match it.
+        _write_state(current_wallpaper() or wallpaper, theme["accent"])
     return theme
 
 
@@ -1493,19 +1555,39 @@ def watch_loop():
             stamp = HYPREPAPER.stat().st_mtime
             wall = current_wallpaper()
             if stamp != last or wall != last_wall:
-                last = stamp
-                last_wall = wall
-                if wall and os.path.exists(wall):
-                    try:
-                        theme = apply(wall, False)
-                        # Reload the DE only when the accent actually changed;
-                        # otherwise identical re-fires (boot, calls) stay quiet.
-                        if theme["accent"] != last_accent:
-                            last_accent = theme["accent"]
-                            reload()
-                        print("[palette] %s %s %s" % (theme["mode"], wall, theme["accent"]), flush=True)
-                    except Exception as exc:
-                        print("[palette] error %r" % exc, flush=True)
+                # apply-wallpaper holds .wallpaper.lock from before it rewrites
+                # hyprpaper.conf until its palette.py --apply finishes. Deferring
+                # while that lock is fresh closes the race that used to make
+                # this daemon reload the whole desktop a second time.
+                fresh = False
+                try:
+                    age = time.time() - Path(WALL_LOCK).stat().st_mtime
+                    fresh = age < 600
+                except Exception:
+                    fresh = False
+                if fresh:
+                    print("[palette] apply in progress; deferring", flush=True)
+                else:
+                    last = stamp
+                    last_wall = wall
+                    m_wall, m_accent = _read_state()
+                    if wall and wall == m_wall:
+                        # The explicit --apply already generated and reloaded
+                        # for this exact wallpaper: adopt its state, restart
+                        # nothing (the widgets/waybar/cava just came back).
+                        last_accent = m_accent
+                        print("[palette] %s already applied" % wall, flush=True)
+                    elif wall and os.path.exists(wall):
+                        try:
+                            theme = apply(wall, False)
+                            # Reload the DE only when the accent actually changed;
+                            # otherwise identical re-fires (boot, calls) stay quiet.
+                            if theme["accent"] != last_accent:
+                                last_accent = theme["accent"]
+                                reload()
+                            print("[palette] %s %s %s" % (theme["mode"], wall, theme["accent"]), flush=True)
+                        except Exception as exc:
+                            print("[palette] error %r" % exc, flush=True)
         time.sleep(2)
 
 

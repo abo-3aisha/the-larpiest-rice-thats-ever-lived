@@ -40,6 +40,7 @@ def accent_hex():
 
 
 ACCENT = accent_hex()
+ACCENT_RGB = ", ".join(str(int(ACCENT[i:i + 2], 16)) for i in (1, 3, 5))
 
 
 def initial_pct(tag):
@@ -263,8 +264,14 @@ if screen.get_rgba_visual():
     win.set_visual(screen.get_rgba_visual())
 
 css = ("""
-#volbar { background-color: rgba(16,18,22,0.92); border-radius: 16px;
-          border: 1px solid rgba(255,255,255,0.10); }
+ #volbar { background-color: rgba(16,18,22,0.92);
+           background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+           border-radius: 16px;
+           border: 1px solid rgba(255,255,255,0.10);
+           box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                       0 0 0 1px rgba(255,255,255,0.05),
+                       0 10px 26px rgba(0,0,0,0.40),
+                       0 0 16px rgba(%s, 0.10); }
 .lbl { color: %s; font-weight: bold; font-size: 13px; }
 .pct { color: %s; font-size: 12px; font-weight: bold; }
 scale trough { background-color: rgba(255,255,255,0.14); min-height: 6px; border-radius: 3px; }
@@ -274,7 +281,7 @@ button { background-color: rgba(255,255,255,0.08); border-radius: 10px; color: %
          border: 1px solid rgba(255,255,255,0.10); font-size: 12px; font-weight: bold; }
 button:hover { background-color: rgba(255,255,255,0.16); }
 button:checked { background-color: %s; color: #0d0d0f; }
-""" % (ACCENT, ACCENT, ACCENT, ACCENT, ACCENT))
+""" % (ACCENT_RGB, ACCENT, ACCENT, ACCENT, ACCENT, ACCENT))
 provider = Gtk.CssProvider()
 provider.load_from_data(css.encode())
 Gtk.StyleContext.add_provider_for_screen(screen, provider,

@@ -13,7 +13,7 @@
     "modules-center": [
         "custom/weather",
         "custom/net-speed",
-        "clock"
+        "custom/clock"
     ],
     "modules-right": [
         "tray",
@@ -41,12 +41,6 @@
     "hyprland/language": {
         "format": "{}",
         "tooltip": false
-    },
-    "clock": {
-        "format": "{:%I:%M %p}",
-        "format-alt": "{:%a %d %b}",
-        "tooltip-format": "<tt>{calendar}</tt>",
-        "on-click": "/home/abo3aisha/.local/bin/clock-click"
     },
     "tray": {
         "icon-size": 20,
@@ -101,5 +95,10 @@
         "format": " ",
         "tooltip": false,
         "on-click": "/home/abo3aisha/.local/bin/session-menu"
+    },
+    "custom/clock": {
+        "exec": "/home/abo3aisha/.local/bin/waybar-clock",
+        "interval": 20,
+        "on-click": "/home/abo3aisha/.local/bin/clock-click"
     }
 }

@@ -248,7 +248,11 @@
 #custom-battery.b99.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r99.png"); }
 #custom-battery.b100.critical { background-image: url("/home/abo3aisha/.config/waybar/batt/r100.png"); }
 
-/* ===== charging bolt (bolt-indicator.sh) — appears ONLY while charging ===== */
+/* ===== charging bolt (bolt-indicator.sh) — appears ONLY while charging =====
+   The script cycles c0..c5 at ~150 ms; those classes are the animation. Opacity
+   is used instead of hard-coded colours so the pulse always follows whatever
+   accent the current wallpaper produced. c0 and c5 share a value so the wrap
+   from the last frame back to the first is seamless. */
 #custom-bolt {
     padding: 0;
     margin: 1px 3px 1px 0;
@@ -260,6 +264,35 @@
 #custom-bolt.charging { color: @accent@; }
 #custom-bolt.off { color: transparent; }
 
+/* Two curves, one continuous motion. The transition is what makes it smooth:
+   each class change is interpolated by GTK instead of snapping, so a handful
+   of steps reads as one slow swell. Duration must sit just under the script's
+   frame time or the glow visibly lags behind its own steps. */
+#custom-bolt { transition: opacity 170ms linear, color 170ms linear; }
+
+/* On AC: a wide, even breath. Peak is the plain accent — a white-hot flash
+   every 1.6s turned out to be genuinely annoying to look at. */
+#custom-bolt.charging.c0 { opacity: 0.34; }
+#custom-bolt.charging.c1 { opacity: 0.48; }
+#custom-bolt.charging.c2 { opacity: 0.64; }
+#custom-bolt.charging.c3 { opacity: 0.80; }
+#custom-bolt.charging.c4 { opacity: 0.92; }
+#custom-bolt.charging.c5 { opacity: 1.00; }
+#custom-bolt.charging.c6 { opacity: 0.92; }
+#custom-bolt.charging.c7 { opacity: 0.80; }
+
+/* On battery: much dimmer and slower — present, not asking for attention. */
+#custom-bolt.battery.c0 { opacity: 0.30; }
+#custom-bolt.battery.c1 { opacity: 0.20; }
+#custom-bolt.battery.c2 { opacity: 0.30; }
+
+/* At 100%: a still, low glow. Two steps over 3s, so it barely moves — the
+   absence of motion is the signal. Kept below the charging peak on purpose:
+   "full" should read as quieter than "charging", not louder. */
+#custom-bolt.full { color: @accent@; }
+#custom-bolt.full.c0 { opacity: 0.50; }
+#custom-bolt.full.c1 { opacity: 0.62; }
+
 /* ===== Material You tint (2026-09-26) ===== */
 #pulseaudio { color: @accent@; }
 #pulseaudio:hover { color: @accent@; }
@@ -268,3 +301,24 @@
 #tray { background: rgba(@accent_rgb@, 0.08); border-radius: 16px; padding: 0 10px; margin: 1px 2px; }
 #tray:hover { background: rgba(@accent_rgb@, 0.15); }
 
+
+/* ===== liquid glass — touch-glass pass (2026-10-07) ===== */
+/* Layered AFTER the template's pill rules on purpose: this overrides their
+   box-shadow and adds a light falloff over the {glass} background. The
+   specular top line + faint accent rim is what reads as GLASS; a flat
+   translucent bg alone just looks like a dark overlay. */
+.modules-left,
+.modules-center,
+.modules-right {
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.30),
+        0 0 0 1px rgba(255,255,255,0.05),
+        0 6px 18px rgba(0,0,0,0.14),
+        0 0 16px rgba(@accent_rgb@, 0.10);
+}
+.modules-left:hover,
+.modules-center:hover,
+.modules-right:hover {
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.14), rgba(255,255,255,0.03) 45%, rgba(255,255,255,0));
+}

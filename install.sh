@@ -56,7 +56,8 @@ cd "$HERE" || exit 1
 # The adhan is deliberately NOT skipped — the rice needs it to ring.
 manifest() {
     git ls-files 2>/dev/null | grep -v -e '^screenshots/' -e '^README\.md$' \
-        -e '^install\.sh$' -e '^\.git/' -e '\.webp$' -e '\.png$' -e '\.jpg$'
+        -e '^install\.sh$' -e '^requirements\.sh$' -e '^CHANGELOG\.md$' \
+        -e '^\.git/' -e '\.webp$' -e '\.png$' -e '\.jpg$'
 }
 
 if [ "$MODE" = "uninstall" ]; then
@@ -133,11 +134,19 @@ missing=""
 have() { command -v "$1" >/dev/null 2>&1 || missing="$missing $2"; }
 pkg()  { pacman -Qq "$1" >/dev/null 2>&1 || missing="$missing $1"; }
 
-have hyprctl hyprland;        have wofi wofi;        have swaync-client swaync
-have mpvpaper mpvpaper;        have awww awww;        have grim grim
-have pactl wireplumber;        have playerctl playerctl
-pkg waybar; pkg cava; pkg qt6ct; pkg contour; pkg kitty
-pkg python-gobject; pkg gtk-layer-shell; pkg wl-clipboard; pkg cliphist
+have hyprlock hyprlock;   have hypridle hypridle
+have hyprpaper hyprpaper; have hyprpicker hyprpicker
+have swaync-client swaync; have wlogout wlogout
+have mpvpaper mpvpaper;   have awww awww;    have swww swww
+have hyprshot hyprshot;   have grim grim;    have slurp slurp
+have playerctl playerctl; have pactl wireplumber; have wpctl wireplumber
+have brightnessctl brightnessctl; have gammastep gammastep
+have amixer alsa-utils;   have cliphist cliphist; have wtype wtype
+have qrencode qrencode;   have jq jq;    have killall psmisc
+have wf-recorder wf-recorder
+pkg waybar; pkg cava; pkg fish; pkg foot; pkg contour; pkg kitty; pkg dolphin
+pkg python-gobject; pkg gtk-layer-shell; pkg wl-clipboard
+pkg qt6ct; pkg ffmpeg; pkg mpv; pkg imv; pkg ttf-jetbrains-mono-nerd
 
 printf '  %sDependencies%s\n' "$C" "$N"
 if [ -z "$missing" ]; then
@@ -145,6 +154,7 @@ if [ -z "$missing" ]; then
 else
     warn "missing:$missing"
     printf '     sudo pacman -S%s\n' "$missing"
+    printf '     or run ./requirements.sh to install ALL of them (repos + AUR) automatically\n'
 fi
 echo
 

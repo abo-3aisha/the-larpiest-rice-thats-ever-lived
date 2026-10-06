@@ -52,3 +52,9 @@ if status is-interactive
 end
 
 # (removed) alias fastfetch=... Black Mesa chafa logo — reset to CachyOS default
+
+# ISO build probe (run the ISO installer launcher in a chroot + show its log)
+alias p ~/iso-build/probe.sh
+
+# ~/bin on PATH (has the ISO probe: p)
+fish_add_path $HOME/bin

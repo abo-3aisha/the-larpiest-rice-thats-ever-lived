@@ -187,7 +187,10 @@ hl.config({
             enabled   = PERF_BLUR,
             size      = 8,
             passes    = 2,
-            vibrancy  = 0.15,
+            -- Liquid glass: higher vibrancy = wallpaper colour punches through
+            -- the blur (Apple-style) instead of going gray. 0.40 keeps it
+            -- readable; the perf profile can still turn blur off wholesale.
+            vibrancy  = 0.40,
             xray      = false,
             popups    = true,
         },
@@ -327,6 +330,13 @@ hl.window_rule({ match = { class = "nowpanel" }, float = true, size = "1160 300"
 
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("/home/abo3aisha/.local/bin/pick-wallpaper"))
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd("/home/abo3aisha/.local/bin/cycle-wallpaper toggle"))
+-- SUPER+P: freeze the video wallpaper on the current frame / resume it
+-- (video-pause = SIGSTOP/SIGCONT on mpvpaper; image wallpapers just notify)
+-- pcall(unbind) first: a stale/default SUPER+P (e.g. pin-window from an older
+-- layer) silently wins the registry and makes the fresh bind a no-op — the
+-- exact "keypress does nothing" symptom. unbind clears it, then bind fresh.
+pcall(hl.unbind, mainMod .. " + P")
+hl.bind(mainMod .. " + P", hl.dsp.exec_cmd("/home/abo3aisha/.local/bin/video-pause"))
 
 -- === SCREENSHOTS ===
 

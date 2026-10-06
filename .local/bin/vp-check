@@ -1,0 +1,22 @@
+#!/bin/sh
+# vp-check — video wallpaper + SUPER+P status (v2: uses hyprctl -j, shows ALL
+# mpvpaper pids with age so an old frozen instance is visible next to a fresh one)
+j=$(hyprctl -j binds 2>/dev/null)
+if [ -z "$j" ]; then
+    echo "binds:     hyprctl -j binds FAILED (empty)"
+else
+    # NOTE: HyprMod's lua binds do NOT show up in hyprctl binds on this build
+    # (pick-wallpaper is MISSING too although SUPER+W works) — info only.
+    printf 'binds:     json_ok=%s total=%s (lua binds not listed here — functional test only)\n' \
+        "yes" "$(printf '%s' "$j" | grep -o '"key"' | wc -l)"
+fi
+n=$(pgrep -x mpvpaper | wc -l)
+echo "mpvpaper:  $n instance(s)"
+for p in $(pgrep -x mpvpaper); do
+    printf '  pid %-8s state=%-3s age=%-8s %s\n' "$p" \
+        "$(ps -o state= -p "$p" 2>/dev/null | awk '{print $1}')" \
+        "$(ps -o etime= -p "$p" 2>/dev/null | awk '{print $1}')" \
+        "$(ps -o args= -p "$p" 2>/dev/null | cut -c1-70)"
+done
+echo "conf:      $(sed -n 's/^wallpaper *= *[^,]*, *//p' "$HOME/.config/hypr/hyprpaper.conf" 2>/dev/null | head -1)"
+echo "last log:  $(tail -1 "$HOME/.cache/wallpaper-apply.log" 2>/dev/null)"

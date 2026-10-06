@@ -3,23 +3,33 @@
 }
 
 .control-center {
-    background: rgba(29, 21, 43, 0.80);
-    border: 1px solid #6fdbfe44;
+    background: rgba(16, 14, 11, 0.80);
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+    border: 1px solid rgba(255,255,255,0.10);
     border-radius: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                0 0 0 1px rgba(255,255,255,0.05),
+                0 14px 36px rgba(0,0,0,0.38),
+                0 0 16px rgba(210, 134, 101, 0.10);
 }
 
 .notification-window {
-    background: #1d152b;
-    border: 1px solid #6fdbfe44;
+    background: rgba(16, 14, 11, 0.80);
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+    border: 1px solid rgba(255,255,255,0.10);
     border-radius: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                0 0 0 1px rgba(255,255,255,0.05),
+                0 10px 28px rgba(0,0,0,0.34),
+                0 0 16px rgba(210, 134, 101, 0.10);
 }
 
 .widget-title {
-    color: #c4ebf5;
+    color: #b2b6bb;
 }
 .widget-title > button {
-    background: #2f283c;
-    color: #c4ebf5;
+    background: #23211f;
+    color: #b2b6bb;
     border-radius: 10px;
 }
 
@@ -28,26 +38,32 @@
 }
 
 .notification {
-    background: #2f283c;
+    background: #23211f;
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
     border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.06);
     padding: 8px 12px;
-    color: #c4ebf5;
+    color: #b2b6bb;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22),
+                0 0 0 1px rgba(255,255,255,0.04),
+                0 4px 14px rgba(0,0,0,0.26),
+                0 0 10px rgba(210, 134, 101, 0.08);
 }
 
 .notification-content {
-    background: #2f283c;
-    color: #c4ebf5;
+    background: #23211f;
+    color: #b2b6bb;
 }
 
 .notification-default-action, .notification-action {
-    background: #1d152b;
-    color: #c4ebf5;
+    background: #100e0b;
+    color: #b2b6bb;
     border-radius: 8px;
 }
 
 .notification-default-action:hover, .notification-action:hover {
-    background: #6fdbfe;
-    color: #111113;
+    background: #d28665;
+    color: #eff1f4;
 }
 
 .notification-body {
@@ -55,27 +71,27 @@
 }
 
 .notification-title {
-    color: #c4ebf5;
+    color: #b2b6bb;
     font-weight: bold;
 }
 
 .close-button {
     background: #e5484d;
-    color: #111113;
+    color: #eff1f4;
     border-radius: 50%;
 }
 
 #dnd {
-    color: #6fdbfe;
+    color: #d28665;
 }
 #dnd > button {
-    background: #2f283c;
-    color: #6fdbfe;
+    background: #23211f;
+    color: #d28665;
     border-radius: 10px;
 }
 
 .parameter-value {
-    color: #6fdbfe;
+    color: #d28665;
 }
 
 /* --- Control-center tiles (Android-style quick settings) --- */
@@ -85,34 +101,34 @@
      background: transparent;
  }
  .quick button {
-     background: #6fdbfe40;
-     color: #6fdbfe;
+     background: #d2866540;
+     color: #d28665;
      border: 2px solid transparent;
-     border-top: 2px solid #6fdbfe88;
-     border-bottom: 2px solid #6fdbfe2E;
+     border-top: 2px solid #d2866588;
+     border-bottom: 2px solid #d286652E;
      border-radius: 18px;
      font-weight: bold;
      padding: 12px 14px;
  }
  .quick button label {
-     color: #6fdbfe;
+     color: #d28665;
  }
  .quick button:hover {
-     border: 2px solid #6fdbfe;
-     background: #6fdbfe55;
+     border: 2px solid #d28665;
+     background: #d2866555;
  }
  .quick button:active {
-     background: #6fdbfe66;
+     background: #d2866566;
  }
  /* A toggle tile that is ON gets the .active class and is filled with the wallpaper accent (like Android) */
  .quick button.active {
-     background: #6fdbfe;
-     color: #111113;
-     border: 2px solid #ffe9f1;
+     background: #d28665;
+     color: #eff1f4;
+     border: 2px solid #f2eedc;
  }
  .quick button.active:hover {
-     border: 2px solid #ffe9f1;
-     background: #6fdbfe;
+     border: 2px solid #f2eedc;
+     background: #d28665;
      opacity: 0.95;
  }
 
@@ -126,7 +142,7 @@
 }
 #volume highlight, #brightness highlight,
 .widget-volume highlight, .widget-backlight highlight {
-    background: #6fdbfe;
+    background: #d28665;
     border-radius: 999px;
     opacity: 0.92;
 }
@@ -143,7 +159,7 @@
 #volume slider trough highlight, #brightness slider trough highlight,
 .widget-volume scale trough highlight, .widget-backlight scale trough highlight,
 .mic scale trough highlight, #mic scale trough highlight, .volume scale trough highlight {
-    background: #6fdbfe;
+    background: #d28665;
     border-radius: 999px;
     opacity: 0.92;
 }
@@ -151,8 +167,8 @@
 #volume slider slider, #brightness slider slider,
 .widget-volume scale slider, .widget-backlight scale slider,
 .mic scale slider, #mic scale slider, .volume scale slider {
-    background: #ffe9f1;
-    border: 2px solid #6fdbfe;
+    background: #f2eedc;
+    border: 2px solid #d28665;
     border-radius: 50%;
     min-width: 14px;
     min-height: 14px;

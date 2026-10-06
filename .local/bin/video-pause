@@ -1,0 +1,52 @@
+#!/bin/sh
+# video-pause — SUPER+P: freeze the video wallpaper on the exact frame you
+# press, press again to resume. SIGSTOP/SIGCONT on mpvpaper: the compositor
+# keeps the last submitted buffer, so the paused frame is pixel-perfect and
+# the stopped process costs zero CPU until CONT.
+#
+# Self-healing: if mpvpaper is gone while hyprpaper.conf still points at a
+# video, the key restarts it (full apply-wallpaper, conversion is cached)
+# instead of just complaining. apply-wallpaper CONTs before killing mpvpaper,
+# so switching wallpaper while paused still works.
+# Breadcrumb: every invocation lands in video-pause.dbg so "did the bind even
+# fire?" is answerable from the file alone (no asking the user).
+dbg() { printf '%s  %s\n' "$(date +%T)" "$*" >> "$HOME/.cache/video-pause.dbg" 2>/dev/null; }
+dbg "fired args=[$*]"
+pid=$(pgrep -x mpvpaper | head -n 1)
+if [ -z "$pid" ]; then
+    conf=$(sed -n 's/^wallpaper *= *[^,]*, *//p' \
+        "$HOME/.config/hypr/hyprpaper.conf" 2>/dev/null | head -n 1)
+    case "$conf" in
+        *.mp4|*.mkv|*.webm|*.mov|*.avi|*.m4v)
+            [ -f "$conf" ] || { notify-send -t 2500 "Wallpaper" \
+                "Video file missing: $conf" 2>/dev/null; exit 1; }
+            notify-send -t 2500 "Wallpaper" "Video player not running — restarting" 2>/dev/null
+            exec "$HOME/.local/bin/apply-wallpaper" "$conf"
+            ;;
+        *)
+            notify-send -t 2500 "Wallpaper" "No video wallpaper is playing" 2>/dev/null
+            exit 0
+            ;;
+    esac
+fi
+# ps state is not just one letter: it can be "T+", "Sl", "Ss+"; only the
+# FIRST char tells stopped (T/t) vs running — matching the whole string
+# silently failed on "T+" and re-sent STOP, leaving the video frozen.
+state=$(ps -o state= -p "$pid" 2>/dev/null | awk '{print substr($1,1,1)}')
+dbg "pid=[${pid:-none}] state=[${state:-?}]"
+case "$state" in
+    T|t)
+        if kill -CONT "$pid" 2>/dev/null; then
+            notify-send -t 1500 "Wallpaper" "Video resumed" 2>/dev/null
+        else
+            notify-send -t 2500 "Wallpaper" "resume failed (pid $pid)" 2>/dev/null
+        fi
+        ;;
+    *)
+        if kill -STOP "$pid" 2>/dev/null; then
+            notify-send -t 1500 "Wallpaper" "Video paused" 2>/dev/null
+        else
+            notify-send -t 2500 "Wallpaper" "pause failed (pid $pid)" 2>/dev/null
+        fi
+        ;;
+esac

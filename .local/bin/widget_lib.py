@@ -76,8 +76,10 @@ def one_instance(key):
 _BODY = """
 window.wwin {
   background: rgba(13,13,17,0.55);
+  background-image: linear-gradient(to bottom, rgba(255,255,255,0.09), rgba(255,255,255,0.0) 32%%);
   border: 2px solid #%s;
   border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 8px 22px rgba(0,0,0,0.30);
 }
 window.wwin label { color: #f1f1f3; }
 """

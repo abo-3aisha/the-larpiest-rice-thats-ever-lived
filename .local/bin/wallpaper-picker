@@ -45,6 +45,33 @@ def list_files():
     return files
 
 
+def current_wallpaper_index(files):
+    """Index of the wallpaper currently set in hyprpaper.conf so the picker
+    opens focused on it. Video wallpapers point at the converted cache copy
+    (~/.cache/video-wallpaper/conv/<name>-1080p60.<ext>), so match that too."""
+    path = ""
+    try:
+        for line in open(CONF):
+            line = line.strip()
+            if line.startswith("wallpaper") and "," in line:
+                path = line.split(",", 1)[1].strip()
+                break
+    except OSError:
+        return 0
+    if not path or not files:
+        return 0
+    ap = os.path.abspath(path)
+    for i, f in enumerate(files):
+        if os.path.abspath(f) == ap:
+            return i
+    bn = os.path.basename(ap)
+    for i, f in enumerate(files):
+        stem, ext = os.path.splitext(os.path.basename(f))
+        if bn == stem + "-1080p60" + ext:
+            return i
+    return 0
+
+
 def thumb(path):
     key = hashlib.md5(os.path.abspath(path).encode()).hexdigest()[:16]
     out = os.path.join(THUMB, key + ".jpg")
@@ -79,11 +106,14 @@ XOFF = -300  # the carousel sits left of center; size is untouched
 
 
 class Coverflow:
-    def __init__(self, files):
+    def __init__(self, files, start=0):
         self.files = files
         self.n = len(files)
-        self.pos = 0.0
-        self.target = 0.0
+        # Infinite strip: pos/target are unbounded on a virtual line that wraps
+        # modulo n (wrap_d renders the shortest path), so pressing past the
+        # first item lands on the last one and vice versa.
+        self.pos = float(start)
+        self.target = float(start)
         self.ticking = False
         self._pbs = OrderedDict()
         self._pb_lock = threading.Lock()
@@ -129,7 +159,7 @@ class Coverflow:
         self.da.connect("button-press-event", self.on_click)
         self.da.connect("scroll-event", self.on_scroll)
 
-        hint = Gtk.Label(label="arrows flip  ·  Enter apply  ·  Esc close")
+        hint = Gtk.Label(label="arrows flip (∞ wrap)  ·  Enter apply  ·  Esc close")
         hint.get_style_context().add_class("hint")
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -140,9 +170,9 @@ class Coverflow:
         self.win.fullscreen()
         self.win.present()
 
-        for i in range(max(0, round(self.pos) - 2),
-                       min(self.n, round(self.pos) + 3)):
-            self.pb(i)
+        for k in range(-2, 3):
+            if self.n:
+                self.pb((start + k) % self.n)
 
     def pb(self, i):
         with self._pb_lock:
@@ -171,7 +201,10 @@ class Coverflow:
         return pb
 
     def move(self, delta):
-        self.target = max(0.0, min(self.n - 1, self.target + delta))
+        if self.n < 2:
+            return
+        # no clamping: the strip is infinite, wrap_d folds it for drawing
+        self.target += delta
         if not self.ticking:
             self.ticking = True
             GLib.timeout_add(16, self.tick)
@@ -188,7 +221,9 @@ class Coverflow:
         return True
 
     def current_idx(self):
-        return max(0, min(self.n - 1, int(round(self.pos))))
+        if self.n < 1:
+            return 0
+        return int(round(self.pos)) % self.n
 
     def round_rect(self, cr, x, y, w, h, r):
         from math import pi
@@ -252,8 +287,10 @@ class Coverflow:
             cr.stroke()
             cr.restore()
 
-    def wrap_d(self, i):
-        d = i - self.pos
+    def wrap_d(self, i, base=None):
+        if base is None:
+            base = self.pos
+        d = i - base
         n = self.n
         if n > 1:
             while d > n / 2:
@@ -277,7 +314,7 @@ class Coverflow:
 
         cur = round(self.pos)
         order = sorted(range(self.n),
-                       key=lambda i: -abs(i - (cur if self.ticking else round(self.pos))))
+                       key=lambda i: -abs(self.wrap_d(i, cur)))
         for i in order:
             d = self.wrap_d(i)
             if abs(d) > 2.6:
@@ -340,13 +377,15 @@ class Coverflow:
             self.move(-1)
             return True
         if ev.keyval == Gdk.KEY_Home:
-            self.target = 0.0
+            # nearest copy of the FIRST item on the infinite strip
+            self.target += self.wrap_d(0, self.target)
             if not self.ticking:
                 self.ticking = True
                 GLib.timeout_add(16, self.tick)
             return True
         if ev.keyval == Gdk.KEY_End:
-            self.target = float(self.n - 1)
+            # nearest copy of the LAST item on the infinite strip
+            self.target += self.wrap_d(self.n - 1, self.target)
             if not self.ticking:
                 self.ticking = True
                 GLib.timeout_add(16, self.tick)
@@ -422,7 +461,7 @@ def main(argv):
                         "no wallpapers in %s" % DIR])
         return 0
     try:
-        Coverflow(files)
+        Coverflow(files, current_wallpaper_index(files))
         Gtk.main()
     except Exception:
         import traceback

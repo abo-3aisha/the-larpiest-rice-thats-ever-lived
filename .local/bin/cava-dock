@@ -9,6 +9,26 @@ import subprocess
 import sys
 import threading
 
+
+def _perf_off():
+    """Performance app master switch: while perf.conf says cava is off (or
+    saver), refuse to start — hyprland's exec-once and any stray spawn must
+    not fight the Performance toggle."""
+    try:
+        kv = {}
+        for line in open(os.path.expanduser("~/.config/rice/perf.conf")):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                kv[k] = v
+        return kv.get("MODE") == "saver" or kv.get("CAVA", "1") != "1"
+    except OSError:
+        return False
+
+
+if _perf_off():
+    sys.exit(0)
+
 BARS = 64
 FRAME = BARS * 2
 MARGIN = 10

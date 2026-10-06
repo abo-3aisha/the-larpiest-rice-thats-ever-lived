@@ -18,6 +18,13 @@ hl.config({
         },
     },
     general = {
+        col = {
+            active_border = "0xffff2833",
+            inactive_border = {
+                colors = {"rgba(5c1217aa)"},
+                angle = 10,
+            },
+        },
         gaps_in = 6,
         snap = {
             enabled = false,
@@ -27,8 +34,9 @@ hl.config({
         workspace_swipe_forever = false,
     },
     input = {
-        kb_layout = "us,ara",
-        kb_options = "grp:alt_shift_toggle",
+        -- kb_layout / kb_options are owned by ~/.config/hypr/hyprland.lua
+        -- (written by Language and Time). Do not set them here or they get
+        -- reset to us,ara on every reload.
         numlock_by_default = true,
         touchpad = {
             clickfinger_behavior = true,
@@ -39,9 +47,9 @@ hl.config({
 
 -- Keybinds
 hl.unbind("SUPER + T")
-hl.bind("SUPER + T", hl.dsp.exec_cmd("/home/abo3aisha/.local/bin/open-foot"))
-hl.unbind("SUPER + Return")
-hl.bind("SUPER + Return", hl.dsp.exec_cmd("/home/abo3aisha/.local/bin/open-foot"))
+hl.bind("SUPER + T", hl.dsp.exec_cmd("sh -c 'for c in kitty contour ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
+hl.unbind("SUPER + RETURN")
+hl.bind("SUPER + Return", hl.dsp.exec_cmd("sh -c 'for c in kitty contour ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
 hl.unbind("SUPER + W")
 hl.bind("SUPER + W", hl.dsp.exec_cmd("/home/abo3aisha/.local/bin/pick-wallpaper"))
 hl.unbind("SUPER + SHIFT + W")

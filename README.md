@@ -99,8 +99,9 @@ float above the wallpaper but under every window and show on all workspaces.
 
 | Keys | Action | Changes |
 |------|--------|---------|
-| `SUPER + W` | Wallpaper picker | Fullscreen carousel; applies images **and** videos with the shared transition, then re-themes the session |
+| `SUPER + W` | Wallpaper picker | Fullscreen glass carousel that **opens on the current wallpaper** and **wraps infinitely** in both directions; applies images **and** videos with the shared transition, then re-themes the session |
 | `SUPER + SHIFT + W` | Wallpaper slideshow | Toggles a 10-minute rotation through `~/Pictures/Wallpapers` |
+| `SUPER + P` | Pause/resume video wallpaper | Freezes mpvpaper on the exact frame (SIGSTOP); press again to resume, or it restarts a player that died |
 | `SUPER + N` | Notification center | Quick-settings tiles (Wi-Fi, Bluetooth, night light, volume, brightness, mic, screenshot, record) |
 | `SUPER + S` | Control center | Wallpaper, language, keyboard layout, performance, widgets, lock screen style, lock/logout |
 | `SUPER + C` | Clipboard history | Restores the picked text or image to the clipboard |
@@ -157,32 +158,46 @@ All of these go through `fn-key`, which shows an OSD-style notification.
 ```bash
 git clone https://github.com/abo-3aisha/the-larpiest-rice-thats-ever-lived
 cd the-larpiest-rice-thats-ever-lived
-./install.sh
+./requirements.sh          # 1. install every tool the rice needs (repos + AUR)
+./install.sh               # 2. copy the config in + rewrite paths to your home
 ```
 
-That's the whole thing. The installer copies the config into `~/.config` and
-`~/.local`, rewrites every absolute path from `/home/abo3aisha` to your own
+That's the whole thing. `requirements.sh` installs everything the rice calls at
+runtime — the compositor (CachyOS's Lua Hyprland build, `cachyos-hypr-noctalia`),
+the bar/notifications/launcher, the wallpaper daemons, the recording/screenshot
+tools, the audio pipeline, fonts with the waybar glyphs, and the Python/Gtk
+runtime the widgets run on. It is idempotent, tries pacman repos first and only
+falls back to yay for AUR-only names (`--check` previews it, `--optional` adds
+the nice-to-haves). Then `install.sh` copies the config into `~/.config` and
+`~/.local`, rewriting every absolute path from `/home/abo3aisha` to your own
 home directory, then tells you what is still missing.
 
 ```bash
-./install.sh --check      # show what it would do, change nothing
-./install.sh --force      # replace config files that already exist
-./install.sh --uninstall  # remove exactly what the installer put there
+./requirements.sh --check   # show packages that would be installed, touch nothing
+./requirements.sh --optional   # also install thunar/gwenview/keyring/… extras
+./install.sh --check        # show what it would do, change nothing
+./install.sh --force        # replace config files that already exist
+./install.sh --uninstall    # remove exactly what the installer put there
 ```
 
-**It will not install packages for you.** It lists what is missing and prints
-the `pacman -S` line, but pulling 40 packages in behind your back is not
-something a dotfiles installer should do. You stay in charge of your machine.
+The installer **does not install packages silently** — `requirements.sh` is the
+explicit step for that, and `install.sh` only reports what is missing and prints
+the `pacman -S` line. You stay in charge of your machine.
 
-### Requirements
+### Requirements (what requirements.sh installs)
 
-Hyprland, `wofi`, `swaync`, `waybar`, `cava`, `mpvpaper`, `awww`, `grim`,
-`qt6ct`, `contour`, `kitty`, `python-gobject`, `gtk-layer-shell`, `wl-clipboard`,
-`cliphist`.
-
-Optional but nice: `wf-recorder` or `wl-screenrec` for screen recording,
-`cava` for the audio visualizer, `playerctl` for the music widget,
-`wireplumber` for the audio output switcher, `qrencode` for sharing Wi-Fi.
+Hyprland (*Noctalia* Lua build), `waybar`, `swaync`, `wofi`, `wlogout`,
+`hyprlock`, `hypridle`, `hyprpaper`, `hyprpicker`, `cava`, `fastfetch`,
+`mpvpaper`, `awww`, `swww`, `swaybg`, `grim`, `slurp`, `hyprshot`,
+`wf-recorder`, `wl-screenrec`, `ffmpeg`, `mpv`, `pipewire`,
+`wireplumber`, `libpulse`, `alsa-utils`, `gammastep`, `playerctl`,
+`brightnessctl`, `cliphist`, `wtype`, `wl-clipboard`, `qrencode`,
+`qt6ct`, `breeze-gtk`, `python-gobject`, `python-pillow`,
+`python-cairo`, `gtk-layer-shell`, `fish`, `contour`, `kitty`, `foot`,
+`dolphin`, `imv`, `noto-fonts` (+emoji), `ttf-jetbrains-mono-nerd`
+(waybar/swaync glyphs), the xdg portals + `polkit-gnome`, the AUR cursor
+`sweet-cursors`, and more. `./requirements.sh --check` is the authoritative,
+always-up-to-date list.
 
 ### After installing
 

@@ -26,17 +26,44 @@ _sw, _sh = widget_lib.monitor_size()
 _mw = max(80, int(_sw * _e.get("w", 0.2)))
 _INNER = max(1, _mw - 24)
 
+ar, ag, ab = int(a[0:2], 16), int(a[2:4], 16), int(a[4:6], 16)
+
+# Liquid-glass rail (same touch-glass recipe as waybar): translucent base +
+# specular top line + faint accent glow. GTK renders background-image over
+# background-color, so the gradient reads as light falloff on the glass.
 win, box = mkwin("music", """
 #mwhat { font-size: 13px; font-weight: bold; }
 #mtim { font-size: 10px; color: rgba(241,241,243,0.62); }
 #mseek { min-height: 10px; padding: 0; border-radius: 6px; }
-#mseek trough { background: rgba(255,255,255,0.10); border-radius: 6px; min-height: 10px; }
-""")
+#mseek trough {
+  background-color: rgba(27,27,30,0.55);
+  background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%%, rgba(255,255,255,0));
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  min-height: 10px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.30), 0 0 8px rgba(%d,%d,%d,0.14);
+}
+""" % (ar, ag, ab))
 
 p = Gtk.CssProvider()
 p.load_from_data(("""
-#mseek slider { background: #%s; border-radius: 8px; min-width: 14px; min-height: 14px; }
-#mseek progress { background: #%s; border-radius: 6px; min-height: 10px; }
+#mseek slider {
+  background-color: rgba(240,240,245,0.92);
+  background-image: linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0.15));
+  border: 1px solid rgba(255,255,255,0.55);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.90);
+  border-radius: 8px; min-width: 14px; min-height: 14px;
+}
+#mseek highlight {
+  background-color: #%s;
+  background-image: linear-gradient(to bottom, rgba(255,255,255,0.25), rgba(255,255,255,0.0) 55%%);
+  border-radius: 6px; min-height: 10px;
+}
+#mseek progress {
+  background-color: #%s;
+  background-image: linear-gradient(to bottom, rgba(255,255,255,0.25), rgba(255,255,255,0.0) 55%%);
+  border-radius: 6px; min-height: 10px;
+}
 """ % (a, a)).encode())
 try:
     Gtk.StyleContext.add_provider_for_screen(win.get_screen(), p, 810)

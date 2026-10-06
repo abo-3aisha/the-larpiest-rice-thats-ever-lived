@@ -118,6 +118,12 @@ EOF
         hyprctl reload >/dev/null 2>&1
     fi
 
+    # Persist the new mode BEFORE touching the surfaces: the balanced branch
+    # below runs widgets-apply, and widgets-apply reads MODE from this file
+    # (master switch) to decide whether spawning is allowed — with the old
+    # ordering it still saw the previous mode.
+    setv MODE $([ "$saver" = 1 ] && echo saver || echo balanced)
+
     # the two 60fps / always-on layer surfaces
     # Both directions matter. Only starting them meant a profile that turned
     # cava or the widgets OFF did nothing at all, because whatever was already
@@ -169,7 +175,8 @@ EOF
         fi
     fi
 
-    setv MODE $([ "$saver" = 1 ] && echo saver || echo balanced)
+    # MODE was already persisted above (before the surface section) so that
+    # widgets-apply — which enforces this very mode — sees it when it runs.
     # The Performance app already announces the real profile name. Without this
     # guard every profile answered with "balanced", because apply_saver only
     # knows two states and the app is the one that knows which profile was picked.

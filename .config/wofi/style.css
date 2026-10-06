@@ -1,7 +1,12 @@
 window {
     background-color: rgba(20, 20, 23, 0.62);
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
     border-radius: 18px;
-    border: 1px solid #6fdbfe66;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
+                0 0 0 1px rgba(255,255,255,0.05),
+                0 12px 34px rgba(0,0,0,0.40),
+                0 0 16px rgba(210, 134, 101, 0.10);
 }
 
 #outer-box {
@@ -11,14 +16,16 @@ window {
 
 #input {
     background-color: #2a2a30;
+    background-image: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.0) 40%);
     color: #eff1f4;
-    border: 1px solid #6fdbfe88;
+    border: 1px solid rgba(210, 134, 101, 0.53);
     border-radius: 10px;
     padding: 8px 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
 }
 
 #input:focus {
-    border-color: #6fdbfe;
+    border-color: #d28665;
 }
 
 #entry {
@@ -27,8 +34,8 @@ window {
 }
 
 #entry:selected {
-    background-color: #6fdbfe;
-    color: #111113;
+    background-color: #d28665;
+    color: #eff1f4;
 }
 
 #scroll {
@@ -41,7 +48,7 @@ window {
 }
 
 #text:selected {
-    color: #111113;
+    color: #eff1f4;
 }
 
 #img {

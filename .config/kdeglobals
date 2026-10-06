@@ -150,7 +150,7 @@ ForegroundPositive=39,174,96
 ForegroundVisited=120,127,48
 
 [General]
-AccentColor=215,204,0
+AccentColor=210,134,101
 ColorScheme=WallpaperAccent
 ColorSchemeHash=a278bf628b9a3a52b9a8913c343d0311bfac2195
 LastUsedCustomAccentColor=215,204,0
