@@ -32,7 +32,7 @@ if [ "$radio" = "disabled" ]; then
     menu=$(printf '%s\n' \
         "󰅨  Wi-Fi: OFF — tap to turn ON" \
         "󰤨  Connect to a network…")
-    sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Wi-Fi 󰖩 (OFF)" --lines 2)
+    sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "Wi-Fi 󰖩 (OFF)" --height 144)
     case "$sel" in
         *"ON"*) nmcli radio wifi on >/dev/null 2>&1; sleep 1; exec "$0" ;;
         *"Connect"*) nmcli radio wifi on >/dev/null 2>&1; sleep 2; exec "$HOME/.local/bin/wifi-menu" ;;
@@ -46,7 +46,7 @@ menu=$(printf '%s\n' \
     "󰖡  QR: share this network")
 
 title="Wi-Fi 󰖩 — ${connected:-not connected}"
-sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$title" --lines 3)
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$title" --height 178)
 case "$sel" in
     *"OFF"*) nmcli radio wifi off >/dev/null 2>&1; exec "$0" ;;
     *"Connect"*) exec "$HOME/.local/bin/wifi-menu" ;;

@@ -9,12 +9,45 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 CFG = os.path.expanduser("~/.config/widgets/widgets.json")
 BIN = os.path.expanduser("~/.local/bin")
 RULES = os.path.expanduser("~/.cache/widgets-rules.json")
 GEOM = os.path.expanduser("~/.cache/widgets-geom.json")
 PERF = os.path.expanduser("~/.config/rice/perf.conf")
+DEBOUNCE = os.path.expanduser("~/.cache/widgets-apply.last")
+
+# --force-restart storms (palette --apply + leftover --watch both firing)
+# used to kill+respawn every widget twice within a second. Coalesce forces
+# that arrive less than this many seconds apart.
+FORCE_DEBOUNCE_S = 2.5
+
+
+def _is_x11():
+    if os.environ.get("XDG_SESSION_TYPE") == "x11":
+        return True
+    if os.environ.get("WAYLAND_DISPLAY"):
+        sock = os.path.join(
+            os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid()),
+            os.environ["WAYLAND_DISPLAY"])
+        return not os.path.exists(sock)
+    return bool(os.environ.get("DISPLAY"))
+
+
+def _mark_force():
+    try:
+        open(DEBOUNCE, "w").write(str(time.time()))
+    except OSError:
+        pass
+
+
+def _force_recently():
+    try:
+        return (time.time() - float(open(DEBOUNCE).read().strip())
+                < FORCE_DEBOUNCE_S)
+    except (OSError, ValueError):
+        return False
 
 
 def perf_allows(key):
@@ -40,6 +73,9 @@ def perf_allows(key):
 TITLES = {
     "clock": "^Widget Clock$",
     "clockana": "^Widget Clockana$",
+    "clockday": "^Widget Clockday$",
+    "frame": "^Widget Frame$",
+    "dino": "^Widget Dino$",
     "music": "^Widget Music$",
     "sys": "^Widget Sys$",
     "miku": "^Widget Miku$",
@@ -48,10 +84,12 @@ TITLES = {
     "pet": "^miku-pet$",
 }
 
-NOFOCUS = {"clock": True, "clockana": True, "music": True, "sys": True,
-           "miku": True, "prayer": True, "hijri": True, "pet": False}
-WITH_SIZE = {"clock": True, "clockana": True, "music": True, "sys": True,
-             "miku": True, "prayer": True, "hijri": True, "pet": False}
+NOFOCUS = {"clock": True, "clockana": True, "clockday": True, "frame": True,
+           "dino": False, "music": True, "sys": True, "miku": True,
+           "prayer": True, "hijri": True, "pet": False}
+WITH_SIZE = {"clock": True, "clockana": True, "clockday": True, "frame": True,
+             "dino": True, "music": True, "sys": True, "miku": True,
+             "prayer": True, "hijri": True, "pet": False}
 
 
 def load():
@@ -92,6 +130,8 @@ def save_geom(d):
 
 
 def hypr(arg):
+    if _is_x11():
+        return  # hyprctl rules are a no-op outside Hyprland
     subprocess.run(["hyprctl", "keyword", "windowrule", arg], capture_output=True)
 
 
@@ -118,11 +158,33 @@ def screen_size():
         m = next((x for x in out if x.get("focused")), out[0])
         return m["width"], m["height"]
     except Exception:
-        return 1920, 1080
+        pass
+    # X11: xrandr primary / current mode
+    try:
+        out = subprocess.run(["xrandr", "--current"],
+                             capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if " connected" in line and "primary" in line:
+                if "x" in line.split()[-1]:
+                    w, h = line.split()[-1].split("x", 1)
+                    return int(w), int(h)
+        for line in out.splitlines():
+            if line.startswith("Screen") and "current" in line:
+                parts = line.split()
+                return int(parts[2].rstrip(",")), int(parts[4])
+    except Exception:
+        pass
+    return 1920, 1080
 
 
 def main():
     force = "--force-restart" in sys.argv
+    if force and _force_recently():
+        # A coalesced double-force: the previous restart (< FORCE_DEBOUNCE_S
+        # ago) already re-read widgets.json + accent — skip the second kill.
+        return
+    if force:
+        _mark_force()
     cfg = load()
     stored = load_rules()
     geom = load_geom()
@@ -136,7 +198,9 @@ def main():
             pat = "miku-pet"
             script = os.path.join(BIN, "miku-pet")
         else:
-            pat = "widget-%s" % key
+            # "$" anchor: unanchored "widget-clock" also matched
+            # widget-clockana/widget-clockday and killed them by accident
+            pat = "widget-%s$" % key
             script = os.path.join(BIN, "widget-%s" % key)
 
         # unset every previous rule for this title (exact-match unset)

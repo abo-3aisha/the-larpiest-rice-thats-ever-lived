@@ -1,5 +1,86 @@
 # Changelog
 
+## 1.2 — 2026-10-29
+
+### Workspace transitions you can pick
+`SUPER + S → Animations` opens a two-pane picker with ten presets (Classic
+Slide, Slide Fade, Snappy, Cinematic, Super Smooth, Abala Shell, …), live
+preview of each transition's character, and one click applies it. The choice is
+written to `~/.config/rice/ws-anim.conf`, which `hyprland.lua` reads at startup
+and feeds into `hl.animation` for `workspaces`, `workspacesIn` and
+`workspacesOut`. The same file drives `general.gaps_workspaces`, so presets that
+want the wallpaper to show between desktops set the gap themselves. Added the
+`superSmooth`, `abala.standard` and `abala.emphasized` beziers the presets need.
+
+### Lock-screen editor v3 — and it actually stays where you put it
+The editor now follows the same convention as the desktop widget manager: the
+`(x, y)` you see is the widget's **top-left** corner, dragging keeps the grab
+offset so the box never jumps to the cursor, arrow keys nudge, and Shift nudges
+by 1 px. Under the hood, hyprlock's `position` is a layout value that is parsed
+with a comma; the old space-separated `position = X Y` silently failed and
+piled every widget into one corner. The generator now always writes
+`position = X, Y`, refuses to build a comma-less position, and `--build`
+regenerates `hyprlock.conf` headlessly. New lock widgets: **Day Clock**
+(`lockclockday`) and **Photo Frame** (`lockframe`, six transitions).
+
+### Three new desktop widgets
+- **Big Day Clock** (`widget-clockday`) — time pill on top, a huge weekday that
+  slides when the day changes, full date underneath.
+- **Photo Frame** (`widget-frame`) — glass photo slideshow with six
+  transitions (fade, slide in four directions, zoom-fade), never repeating the
+  same image or transition twice in a row.
+- **Dino** (`widget-dino`) — an offline T-Rex endless runner. Click it to give
+  it the keyboard, Space/Up to jump, Down to duck, R to restart; the accent
+  colours the dino and the speed ramps up.
+
+The Widget Manager learned all three, shows a faint 10% grid for alignment,
+keeps the same grab-offset dragging, and now has **Apply (live)** next to
+**Save & Close** so you can tune placement without closing the window.
+
+### Bluetooth menu that really scans
+`SUPER + S → Bluetooth` is now a full manager: power, discoverable/pairable,
+scan for new devices, and connect/disconnect with auto-pair. The old scan was
+`timeout 8 bluetoothctl scan on`, but `bluetoothctl` reads stdin and exits on
+EOF — discovery stopped instantly, so headphones were never found. The scan now
+keeps a command pipe open for the whole discovery window and caches what it
+sees, then re-runs the menu so every state is fresh.
+
+### Folder icons follow the wallpaper — including the plain folder
+`palette.py` now rebuilds a `WallpaperAccent` icon theme and repaints Breeze's
+folder SVGs: neutral grays take the accent hue while keeping their shading ramp,
+and the KDE-blue folder face is recoloured too (it used to stay blue no matter
+what the wallpaper was). The same pass fixes Dolphin's `inode-directory` MIME
+icon. Genuinely grayscale wallpapers keep a neutral `#DFDFDF` accent instead of
+picking up a stray warm or blue cast from a single tinted region.
+
+### Wallpaper pipeline: no more parallel switches
+`apply-wallpaper` now takes a lock before touching anything, and a burst of
+requests can no longer run in parallel (the old code waited and then removed a
+fresh holder's lock, which produced the 9× log lines and widget respawn storms).
+A lock older than 60 s is treated as a crash leftover and reclaimed. Widget
+restarts are debounced the same way: `--force-restart` calls that arrive within
+2.5 s are coalesced, so a theme apply plus a leftover watcher no longer kill and
+respawn every widget twice.
+
+### Wallpaper picker: focus, state and accent
+The picker opens on the wallpaper that is **actively set** in `hyprpaper.conf`
+(the state file is only a fallback, so a slideshow rotation no longer leaves it
+on a stale manual pick). It restores its own focus after every navigation, and
+the selected card's border re-tints from the live `theme.lua` accent.
+
+### Menus and small fixes
+- Session menu (waybar power button) now delegates to `wlogout` with its
+  default 3-per-row layout, so Log out / Sleep / Reboot / Power off sit in one
+  horizontal row; the wofi glyph menu remains as a fallback.
+- `wofi --lines N` was invalid and ignored — replaced with `--height`, so the
+  Wi-Fi, Bluetooth and notification menus size themselves correctly.
+- The screen-record tile in the notification center uses its intended icon.
+- `dolphin` gets a shim that forces `QT_QPA_PLATFORMTHEME=qt6ct`, and Hyprland
+  exports that variable at startup — Dolphin now renders the wallpaper scheme
+  whether it is launched from the keybind, wofi or a script.
+- `rules.lua` fades the launcher layer in so the drop reads as part of the bar
+  instead of a ghost popup.
+
 ## 1.1 — 2026-10-07
 
 ### requirements.sh — one command brings up a fresh machine

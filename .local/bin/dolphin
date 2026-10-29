@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# dolphin shim — forces the qt6ct platform theme so Dolphin renders the
+# wallpaper scheme (white text in dark mode) regardless of who launches it
+# (keybind, wofi, file manager, scripts). The real binary is looked up
+# OUTSIDE this shim's PATH to avoid recursion.
+for d in /usr/bin /usr/local/bin /bin; do
+    [ -x "$d/dolphin" ] && exec env QT_QPA_PLATFORMTHEME=qt6ct "$d/dolphin" "$@"
+done
+real=$(command -v dolphin)
+exec env QT_QPA_PLATFORMTHEME=qt6ct "$real" "$@"

@@ -9,7 +9,7 @@ list=$( {
       | rev | cut -d: -f1 | rev | grep -v '^$' | sort -u
 } )
 
-sel=$(printf '%s\n' "$list" | wofi --dmenu --prompt "Wi-Fi 󰖩" --lines 15)
+sel=$(printf '%s\n' "$list" | wofi --dmenu --prompt "Wi-Fi 󰖩" --height 586)
 [ -z "$sel" ] && exit 0
 
 if [ "$sel" = "$RESCAN_ITEM" ]; then

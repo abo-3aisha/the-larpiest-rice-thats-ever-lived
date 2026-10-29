@@ -3,6 +3,27 @@
 # Avoids the "dispatch" dispatcher entirely (HyprMod hijacks it to evaluate Lua).
 # Uses Hyprland top-level IPC via the command socket: focuswindow + layoutmsg swapnext/swapwith.
 
+# X11 twin: bspwm swap with the west/east neighbour.
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ] && command -v bspc >/dev/null 2>&1; then
+    exec 9>"$HOME/.cache/mirror-tiled.lock"
+    flock -n 9 || exit 0
+    # If the focused node is on the right half of the monitor, swap west; else east.
+    mx="$(bspc query -M -m focused --format "%x %w" 2>/dev/null)"
+    set -- $mx
+    MON_X="${1:-0}"; MON_W="${2:-1920}"
+    cx="$(bspc query -N -n focused --format "%x %w" 2>/dev/null)"
+    set -- $cx
+    NX="${1:-0}"; NW="${2:-0}"
+    ACX=$(( NX + NW / 2 ))
+    MID=$(( MON_X + MON_W / 2 ))
+    if [ "$ACX" -ge "$MID" ]; then
+        bspc node -n west
+    else
+        bspc node -n east
+    fi
+    exit 0
+fi
+
 exec 9>"$HOME/.cache/mirror-tiled.lock"
 flock -n 9 || exit 0
 

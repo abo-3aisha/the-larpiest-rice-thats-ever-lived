@@ -1,40 +1,46 @@
 {
-  "v": 2,
+  "v": 3,
   "widgets": {
+    "clockday": {
+      "enabled": false,
+      "x": 0.5,
+      "y": 0.02,
+      "size": 46
+    },
     "clockana": {
-      "enabled": true,
-      "x": 0.546,
-      "y": 0.039,
+      "enabled": false,
+      "x": 0.0566,
+      "y": 0.0524,
       "size": 300
     },
     "clock": {
-      "enabled": false,
-      "x": 0.469,
-      "y": 0.211,
-      "size": 40
+      "enabled": true,
+      "x": 0.3738,
+      "y": 0.0714,
+      "size": 72
     },
     "date": {
       "enabled": true,
-      "x": 0.927,
-      "y": 0.003,
+      "x": 0.4554,
+      "y": 0.0341,
       "size": 18
     },
     "hijri": {
       "enabled": true,
-      "x": 0.013,
-      "y": 0.017,
+      "x": 0.4043,
+      "y": 0.8235,
       "size": 30
     },
     "prayer": {
       "enabled": true,
-      "x": 0.501,
-      "y": 0.953,
+      "x": 0.4384,
+      "y": 0.2017,
       "size": 30
     },
     "music": {
       "enabled": false,
-      "x": 0.5,
-      "y": 0.31,
+      "x": 0.4847,
+      "y": 0.9463,
       "size": 26
     },
     "sys": {
@@ -48,6 +54,12 @@
       "x": 0.5,
       "y": 0.85,
       "size": 60
+    },
+    "frame": {
+      "enabled": false,
+      "x": 0.1144,
+      "y": 0.5655,
+      "size": 320
     }
   }
 }

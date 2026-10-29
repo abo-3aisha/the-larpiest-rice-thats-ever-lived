@@ -1,8 +1,40 @@
 #!/usr/bin/env bash
 # clipboard-history — browse the clipboard history and put a pick back on the
-# clipboard (copy then paste with Ctrl+V). Backed by cliphist (already running
-# via wl-paste --watch) + wofi. Bound to Super+C.
+# clipboard (copy then paste with Ctrl+V). Backed by cliphist (Wayland) or
+# greenclip/clipmenu (X11) + wofi/rofi. Bound to Super+C.
 set -u
+
+# ---- X11 twin: greenclip ----
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    if command -v greenclip >/dev/null 2>&1; then
+        pgrep -x greenclip >/dev/null 2>&1 || greenclip daemon >/dev/null 2>&1 &
+        sleep 0.2
+        list="$(greenclip print 2>/dev/null | awk '!seen[$0]++' | tail -200)"
+        CLEAR="[ clear history ]"
+        menu=""
+        for m in wofi rofi fuzzel bemenu dmenu; do
+            command -v "$m" >/dev/null 2>&1 && menu="$m" && break
+        done
+        [ -n "$menu" ] || { notify-send -t 4000 "Clipboard" "no menu app found" 2>/dev/null; exit 1; }
+        [ -z "$list" ] && { notify-send -t 3000 "Clipboard" "history is empty" 2>/dev/null; exit 0; }
+        sel="$(printf '%s\n%s\n' "$list" "$CLEAR" | "$menu" --dmenu -i --prompt "Clipboard" 2>/dev/null)"
+        [ -n "$sel" ] || exit 0
+        if [ "$sel" = "$CLEAR" ]; then
+            greenclip clear >/dev/null 2>&1
+            notify-send -t 1500 "Clipboard" "history cleared"
+            exit 0
+        fi
+        printf '%s' "$sel" | greenclip load >/dev/null 2>&1
+        printf '%s' "$sel" | xclip -selection clipboard 2>/dev/null
+        exit 0
+    fi
+    # clipmenu fallback
+    if command -v clipmenu >/dev/null 2>&1; then
+        CM_LAUNCHER=wofi clipmenu -i -p "Clipboard" && exit 0
+    fi
+    notify-send -t 4000 "Clipboard" "install greenclip or clipmenu for X11" 2>/dev/null
+    exit 1
+fi
 
 if ! command -v cliphist >/dev/null 2>&1; then
     notify-send -t 4000 "Clipboard" "cliphist is not installed" 2>/dev/null

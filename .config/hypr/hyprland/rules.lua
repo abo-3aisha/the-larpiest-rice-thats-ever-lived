@@ -229,6 +229,7 @@ hl.layer_rule({ match = { namespace = "launcher" }, animation = "popin 80%", blu
 -- Shell
 hl.layer_rule({ match = { namespace = "caelestia-(border-exclusion|area-picker)" }, no_anim = true })
 hl.layer_rule({ match = { namespace = "caelestia-(drawers|background)" }, animation = "fade" })
+-- layersIn fade so the drop reads as part of the bar, not a ghost popup
 
 -- wofi menus (SUPER+S ctrl-center, SUPER+SPACE wifi list, wallpaper pickers)
 hl.layer_rule({ match = { namespace = "wofi" }, animation = "popin 60%", blur = true })

@@ -2,7 +2,7 @@
 # display-switch — cycle laptop display modes with an external monitor.
 # Order: Extend -> Mirror -> External only -> Internal only -> Extend.
 # Safe no-op (toast) when no external display is connected.
-# Uses `hyprctl keyword monitor` (NOT dispatch — HyprMod hijacks dispatch).
+# Wayland: hyprctl keyword monitor. X11: xrandr.
 set -u
 
 N() {
@@ -12,6 +12,56 @@ N() {
         "$1" "${2:-}" 2>/dev/null
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---- X11 twin via xrandr ----
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    have xrandr || { N "Display" "xrandr not found"; exit 0; }
+    INT="$(xrandr 2>/dev/null | awk '/ connected primary/{print $1; exit} / connected/{if(!f){print $1; f=1}}')"
+    # prefer eDP
+    for d in $(xrandr 2>/dev/null | awk '/ connected/{print $1}'); do
+        case "$d" in eDP*|LVDS*) INT="$d" ;; esac
+    done
+    EXT=""
+    for d in $(xrandr 2>/dev/null | awk '/ connected/{print $1}'); do
+        case "$d" in eDP*|LVDS*|"") ;; *) EXT="$d"; break ;; esac
+    done
+    if [ -z "$INT" ]; then N "Display" "no internal panel"; exit 0; fi
+    if [ -z "$EXT" ]; then
+        # cycle internal-only modes only
+        xrandr --output "$INT" --auto --primary
+        N "Display" "$INT only"
+        exit 0
+    fi
+    # state machine file
+    ST="$HOME/.cache/display-switch-x11"
+    MODE="$(cat "$ST" 2>/dev/null || echo extend)"
+    case "$MODE" in
+        extend)
+            xrandr --output "$INT" --auto --primary --output "$EXT" --auto --right-of "$INT"
+            echo mirror > "$ST"
+            N "Display" "Mirror"
+            ;;
+        mirror)
+            xrandr --output "$INT" --auto --primary --output "$EXT" --auto --same-as "$INT"
+            echo ext > "$ST"
+            N "Display" "External only"
+            ;;
+        ext)
+            xrandr --output "$INT" --off --output "$EXT" --auto --primary
+            echo int > "$ST"
+            N "Display" "Internal only"
+            ;;
+        int|*)
+            xrandr --output "$EXT" --off --output "$INT" --auto --primary
+            echo extend > "$ST"
+            N "Display" "Extend"
+            ;;
+    esac
+    # refresh bar
+    killall -SIGUSR2 waybar 2>/dev/null || true
+    exit 0
+fi
+
 have hyprctl || { N "Display" "hyprctl not found"; exit 0; }
 
 json="$(hyprctl -j monitors all 2>/dev/null)"

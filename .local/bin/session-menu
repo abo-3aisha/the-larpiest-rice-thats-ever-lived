@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
-# session-menu — top-right dropdown: Sleep / Reboot / Shutdown (waybar power button).
+# session-menu — power menu for the waybar power button.
+# Delegates to wlogout (the SAME tool as SUPER+SHIFT+E) with its DEFAULT layout:
+# buttons_per_row = 3, so the 3 entries sit in ONE HORIZONTAL ROW (user wanted
+# "بالعرض مو بالطول"). Falls back to a wofi glyph dropdown if wlogout is
+# missing. Log out uses logind (HyprMod hijacks `hyprctl dispatch`).
 set -u
+
+# wlogout is Wayland-only — skip it on X11 (bspwm twin).
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    command -v wlogout >/dev/null 2>&1 || true
+elif command -v wlogout >/dev/null 2>&1; then
+    exec wlogout
+fi
 
 menu=""
 for m in wofi rofi fuzzel; do
@@ -12,46 +23,29 @@ if [ -z "$menu" ]; then
     exit 1
 fi
 
-GW="$(hyprctl -j monitors 2>/dev/null | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    m = next((x for x in d if x.get('focused')), d[0])
-    print(int(m['width'] / m['scale']))
-except Exception:
-    print('0')" 2>/dev/null)"
-GW="${GW:-0}"
-
-if [ "$GW" -gt 0 ]; then
-    X=$(( GW - 250 ))
-    [ "$X" -lt 0 ] && X=0
-else
-    X=0
-fi
-
 eval "$("$HOME/.local/bin/i18n.py" dump)"
 
-opts="󰒲  $T_SES_SLEEP\n󰜎  $T_SES_REBOOT\n󰐥  $T_SES_SHUTDOWN\n"
+# Icon-only vertical list (NO labels): Log out / Sleep / Reboot / Power off.
+glyphs=(󰍃 󰒲 󰜎 󰐥)
+opts="$(printf '%s\n' "${glyphs[@]}")"
+
 case "$menu" in
-    wofi)   sel="$(printf "%b" "$opts" | wofi --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 --lines 1 --columns 3 2>/dev/null)" ;;
-    rofi)   sel="$(printf "%b" "$opts" | rofi -dmenu -p "⏻" -xoffset "$X" -yoffset 12 -lines 1 -columns 3 2>/dev/null)" ;;
-    fuzzel) sel="$(printf "%b" "$opts" | fuzzel --dmenu --prompt "⏻" --xoffset "$X" --yoffset 12 2>/dev/null)" ;;
+    wofi)   sel="$(printf '%s' "$opts" | wofi --dmenu --prompt "⏻" --hide-search --location top_right --height 66 --columns 4 --width 220 2>/dev/null)" ;;
+    rofi)   sel="$(printf '%s' "$opts" | rofi -dmenu -p "⏻" -lines 4 -columns 1 2>/dev/null)" ;;
+    fuzzel) sel="$(printf '%s' "$opts" | fuzzel --dmenu --prompt "⏻" --anchor top-right --lines 4 --columns 1 --width 100 2>/dev/null)" ;;
 esac
 
-# Dispatch by INDEX, not by matching the visible label: a translated menu can
-# never pick the wrong action, and the confirm step is matched by index too.
-opts_plain=$(printf '%b' "$opts" | sed 's/^[^[:alnum:]]*//')
-mapfile -t rows < <(printf '%b' "$opts_plain")
-sel_plain="${sel#*  }"
+# Dispatch by INDEX: match the picked glyph against the array.
+sel="${sel//[$'\r\n\t ']/}"
 idx=-1
-for i in "${!rows[@]}"; do
-    [ "${rows[$i]}" = "$sel_plain" ] && idx=$i && break
+for i in "${!glyphs[@]}"; do
+    [ "${glyphs[$i]}" = "$sel" ] && idx=$i && break
 done
 
 confirm() {
     local q="$1" cmd="$2" y
     y=$(printf '󰄬  %s\n󰅙  %s\n' "$T_SES_CONFIRM_YES" "$T_SES_CONFIRM_NO" \
-        | wofi --dmenu --prompt "$q" --lines 1 --columns 2 2>/dev/null)
+        | wofi --dmenu --prompt "$q" --height 110 --columns 2 2>/dev/null)
     [ -z "$y" ] && return 1
     case "${y#*  }" in
         "$T_SES_CONFIRM_YES"*) "$cmd" ;;
@@ -59,10 +53,19 @@ confirm() {
     esac
 }
 
+do_logout() {
+    if command -v loginctl >/dev/null 2>&1 && [ -n "${XDG_SESSION_ID:-}" ]; then
+        loginctl terminate-session "$XDG_SESSION_ID"
+    else
+        pkill -x Hyprland || hyprctl dispatch exit
+    fi
+}
+
 case "$idx" in
-    0) systemctl suspend ;;
-    1) confirm "$T_SES_REBOOT_Q"   "systemctl reboot"   || exit 0 ;;
-    2) confirm "$T_SES_SHUTDOWN_Q" "systemctl poweroff" || exit 0 ;;
+    0) confirm "$T_SES_LOGOUT_Q"   do_logout            || exit 0 ;;
+    1) systemctl suspend ;;
+    2) confirm "$T_SES_REBOOT_Q"   "systemctl reboot"   || exit 0 ;;
+    3) confirm "$T_SES_SHUTDOWN_Q" "systemctl poweroff" || exit 0 ;;
     *) exit 0 ;;
 esac
 exit 0

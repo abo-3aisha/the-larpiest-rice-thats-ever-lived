@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.expanduser("~/.local/bin"))
-from widget_lib import mkwin, one_instance
+from widget_lib import mkwin, one_instance, make_flip, flip_set
 
 pidf = one_instance("music")
 
@@ -79,11 +79,9 @@ def pc(args, player=None):
     return r.stdout.strip(), r.returncode
 
 
-art = Gtk.Label()
-art.set_name("mwhat")
-art.set_halign(Gtk.Align.START)
-art.set_ellipsize(3)
-art.set_size_request(_INNER, -1)
+art = make_flip(box, "mwhat", "Nothing playing", ttype="fade", dur=380,
+                pack=False, halign="start", width=_INNER, ellipsize=True)
+art.set_valign(Gtk.Align.CENTER)
 box.pack_start(art, False, False, 0)
 
 tim = Gtk.Label(label="0:00 / 0:00")
@@ -129,7 +127,7 @@ def fmt(s):
 def tick():
     st, _ = pc(["status"], _PLAYER[0])
     if st not in ("Playing", "Paused"):
-        art.set_text("Nothing playing")
+        flip_set(art, "Nothing playing")
         tim.set_text("0:00 / 0:00")
         seek.set_range(0.0, 100.0)
         if _DRAG[0] is None:
@@ -146,7 +144,7 @@ def tick():
 
     title, _ = pc(["metadata", "title"], pl)
     artist, _ = pc(["metadata", "artist"], pl)
-    art.set_text("%s — %s" % (artist or "?", title or "?"))
+    flip_set(art, "%s — %s" % (artist or "?", title or "?"))
 
     ln, _ = pc(["metadata", "mpris:length"], pl)
     dur = 0.0

@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
 # Lock Screen Style — edit the hyprlock lock-screen widgets (SUPER+S).
-# Real GTK widgets cannot render on the lock surface (hyprlock draws ABOVE
-# everything), so lock "widgets" are hyprlock-NATIVE blocks — text labels for
-# clock/date/hijri/prayer/music/sys/miku, plus one annotated PNG image for the
-# cookie clock (rendered by ~/.local/bin/lockclockana and refreshed every 5s
-# via reload_cmd so the hands stay live). smart pet and cava EQ are
-# graphical-only and therefore NOT offered here.
 #
-# PLACEMENT RULE (hyprlock 0.9.x): only the halign/valign anchors are
-# reliable — the installed build falls back to screen center when `position`
-# contains negative offsets (that's why the OLD clock `position = 0 90`
-# rendered at the top while center/center + negative offsets all stacked in
-# the middle). So displacement uses anchors + small POSITIVE offsets only:
-# x<0.3 -> halign=left,  x>0.7 -> halign=right,  else halign=center;
-# y<0.3 -> valign=top,   y>0.7 -> valign=bottom, else valign=center.
-# (v0.9.6 src: IWidget::posFromHAlign honours offsets, but a rejected
-# negative LAYOUTXY keeps the default (0,0) => every label lands at center.)
+# Follows the EXACT same convention as the desktop widget-manager:
+#   (x, y) = widget's TOP-LEFT corner as a fraction of the screen.
+#   Preview box top-left sits at (x, y). Drag keeps grab offset.
+#   Arrow keys nudge (Shift = fine step).
+#
+# hyprlock mapping (halign=left + valign=top):
+#   x_left = px  =>  px = round(x * sw)
+#   y_top  = -py =>  py = -round(y * sh)   (y is bottom-up internally)
+#
+# CRITICAL: hyprlock's `position` is a LAYOUT value parsed by
+# configHandleLayoutOption() in hyprlock/src/config/ConfigManager.cpp,
+# which does VALUE.find(',') and ERRORS OUT with no comma → the value
+# silently falls back to the default 0,0 (then halign/valign alone pile
+# every widget into one corner). ALWAYS write `position = X, Y`.
+#
+# Run `lockscreen-style --build` to regenerate hyprlock.conf headlessly.
 import json
+import math
 import os
-import re
 import shutil
 import subprocess
 import sys
 import warnings
-
-warnings.filterwarnings("ignore", module="gi")
-
-import gi
-gi.require_version("Gtk", "3.0")
-gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, Gtk
 
 import widget_lib
 
@@ -38,45 +32,43 @@ LOCK_JSON = os.path.join(LOCK_DIR, "lockscreen.json")
 HL_CONF = os.path.expanduser("~/.config/hypr/hyprlock.conf")
 BACKUP = os.path.expanduser("~/backups/hyprlock-before-lockscreen-style.conf")
 
-KEYS = ["clockana", "clock", "date", "hijri", "prayer", "music", "sys", "miku"]
+KEYS = ["clockday", "clockana", "clock", "date", "hijri", "prayer",
+        "music", "sys", "miku", "frame"]
 NAMES = {
-    "clockana": "Cookie Clock",
-    "clock": "Clock",
-    "date": "Date",
-    "hijri": "Hijri Date",
-    "prayer": "Next Prayer",
-    "music": "Music (now playing)",
-    "sys": "System (CPU/MEM)",
-    "miku": "Miku",
+    "clockday": "Day Clock", "clockana": "Cookie Clock", "clock": "Clock",
+    "date": "Date", "hijri": "Hijri Date", "prayer": "Next Prayer",
+    "music": "Music", "sys": "System", "miku": "Miku", "frame": "Photo Frame",
 }
-
 TEXT = {
-    # `i18n.py format` with no argument reads CLOCK / DATE from
-    # ~/.config/rice/i18n.conf and renders day/month names from the chosen
-    # language file — so the lock screen follows the rice's language.
-    "clock": "cmd[update:1000] ~/.local/bin/i18n.py format",
-    "date": "cmd[update:30000] ~/.local/bin/i18n.py format --date",
-    "hijri": "cmd[update:3600000] ~/.local/bin/hijri-text",
-    "prayer": "cmd[update:30000] ~/.local/bin/prayer-times --next",
-    "music": "cmd[update:2000] playerctl -a metadata --format '{{artist}} - {{title}}' 2>/dev/null || echo 'No music'",
-    "sys": 'cmd[update:5000] echo "CPU $(~/.local/bin/sys-widget cpu)%  MEM $(~/.local/bin/sys-widget mem)%"',
-    "miku": "cmd[update:5000] ~/.local/bin/miku-kaomoji",
+    "clock":    "cmd[update:1000] ~/.local/bin/i18n.py format",
+    "date":     "cmd[update:30000] ~/.local/bin/i18n.py format --date",
+    "clockday": "cmd[update:30000] ~/.local/bin/lockclockday",
+    "hijri":    "cmd[update:3600000] ~/.local/bin/hijri-text",
+    "prayer":   "cmd[update:30000] ~/.local/bin/prayer-times --next",
+    "music":    "cmd[update:2000] playerctl -a metadata --format '{{artist}} - {{title}}' 2>/dev/null || echo 'No music'",
+    "sys":      'cmd[update:5000] echo "CPU $(~/.local/bin/sys-widget cpu)%  MEM $(~/.local/bin/sys-widget mem)%"',
+    "miku":     "cmd[update:5000] ~/.local/bin/miku-kaomoji",
 }
-
+IMAGE_CFG = {
+    "clockana": {"path": "~/.cache/lockscreen-clockana.png", "reload": 5,  "cmd": "~/.local/bin/lockclockana"},
+    "frame":    {"path": "~/.cache/lockscreen-frame.png",    "reload": 12, "cmd": "~/.local/bin/lockframe"},
+}
 DEFAULTS = {
-    "clockana": {"enabled": True, "x": 0.50, "y": 0.42, "size": 300},
-    "clock": {"enabled": True, "x": 0.50, "y": 0.03, "size": 72},
-    "date":  {"enabled": True, "x": 0.50, "y": 0.24, "size": 34},
-    "hijri": {"enabled": True, "x": 0.02, "y": 0.02, "size": 30},
-    "prayer": {"enabled": True, "x": 0.50, "y": 0.93, "size": 30},
-    "music": {"enabled": False, "x": 0.50, "y": 0.31, "size": 26},
-    "sys":   {"enabled": False, "x": 0.02, "y": 0.10, "size": 26},
-    "miku":  {"enabled": False, "x": 0.50, "y": 0.85, "size": 60},
+    "clockday": {"enabled": False, "x": 0.50, "y": 0.02, "size": 46},
+    "clockana": {"enabled": True,  "x": 0.50, "y": 0.04, "size": 300},
+    "clock":    {"enabled": True,  "x": 0.50, "y": 0.30, "size": 72},
+    "date":     {"enabled": True,  "x": 0.50, "y": 0.50, "size": 18},
+    "hijri":    {"enabled": True,  "x": 0.50, "y": 0.56, "size": 30},
+    "prayer":   {"enabled": True,  "x": 0.50, "y": 0.64, "size": 30},
+    "music":    {"enabled": False, "x": 0.50, "y": 0.30, "size": 26},
+    "sys":      {"enabled": False, "x": 0.02, "y": 0.10, "size": 26},
+    "miku":     {"enabled": False, "x": 0.50, "y": 0.85, "size": 60},
+    "frame":    {"enabled": False, "x": 0.72, "y": 0.55, "size": 320},
 }
 
-# Always-rebuilt fixed blocks: general + background + input-field. They are
-# REGENERATED every save (not copied from the previous file) so they can never
-# be lost when the old file was already stripped.
+STEP = 0.004
+FINE = 0.001
+
 FIXED_BLOCKS = """general {
     no_fade_in = false
     no_fade_out = true
@@ -88,8 +80,6 @@ FIXED_BLOCKS = """general {
 
 background {
     monitor =
-    # empty path = draw no image; Hyprland's session_lock_blur supplies the
-    # LIVE blurred backdrop, this color just tints it.
     path =
     color = rgba(23, 23, 26, 0.40)
     blur_passes = 3
@@ -116,7 +106,7 @@ input-field {
     dots_center = true
     halign = center
     valign = center
-    position = 0 0
+    position = 0, 0
 }
 """
 
@@ -127,51 +117,29 @@ label {{
     color = rgba(239, 241, 244, 1.0)
     font_size = {size}
     font_family = "JetBrainsMono Nerd Font"
-    halign = {halign}
-    valign = {valign}
-    position = {px} {py}
+    halign = left
+    valign = top
+    position = {px}, {py}
     shadow_passes = 2
     shadow_size = 6
     shadow_color = rgba(0, 0, 0, 0.55)
 }}
 """
 
-# The cookie clock is a PNG (transparent star + hands) re-rendered by
-# ~/.local/bin/lockclockana; hyprlock reloads it every reload_time seconds so
-# the hands stay correct while locked. reload_cmd prints nothing -> hyprlock
-# keeps using `path`.
 IMAGE_TPL = """/* @@lockscreen-widget@@ */
 image {{
     monitor =
-    path = ~/.cache/lockscreen-clockana.png
+    path = {path}
     size = {size}
-    reload_time = 5
-    reload_cmd = ~/.local/bin/lockclockana
+    reload_time = {reload}
+    reload_cmd = {cmd}
     rounding = 0
     border_size = 0
-    halign = {halign}
-    valign = {valign}
-    position = {px} {py}
+    halign = left
+    valign = top
+    position = {px}, {py}
 }}
 """
-
-TOP_OFFSET_MAX = 380  # positive offsets in the proven range; stackable
-
-
-def anchor_for(x, y, sw, sh):
-    if x <= 0.30:
-        halign, px = "left", round(x * sw)
-    elif x >= 0.70:
-        halign, px = "right", round((1.0 - x) * sw)
-    else:
-        halign, px = "center", 0
-    if y <= 0.30:
-        valign, py = "top", min(round(y * sh), TOP_OFFSET_MAX)
-    elif y >= 0.70:
-        valign, py = "bottom", min(round((1.0 - y) * sh), TOP_OFFSET_MAX)
-    else:
-        valign, py = "center", 0
-    return halign, valign, px, py
 
 
 def load():
@@ -181,34 +149,55 @@ def load():
         return {}
 
 
+def merged(data=None):
+    out = {k: dict(DEFAULTS[k]) for k in KEYS}
+    loaded = load() if data is None else data
+    for k in KEYS:
+        out[k].update(loaded.get(k, {}))
+    return out
+
+
 def build_conf(data):
     sw, sh = widget_lib.monitor_size()
+    data = merged(data)
     block = ""
     for k in KEYS:
         e = data.get(k) or {}
         if not e.get("enabled"):
             continue
         size = int(e.get("size") or DEFAULTS[k]["size"])
-        halign, valign, px, py = anchor_for(float(e.get("x", 0.5)), float(e.get("y", 0.5)), sw, sh)
-        if k == "clockana":
-            block += IMAGE_TPL.format(size=size,
-                                      halign=halign, valign=valign, px=px, py=py) + "\n"
+        px = int(round(float(e.get("x", 0.5)) * sw))
+        py = -int(round(float(e.get("y", 0.5)) * sh))
+        if k in IMAGE_CFG:
+            cfg = IMAGE_CFG[k]
+            block += IMAGE_TPL.format(path=cfg["path"], reload=cfg["reload"],
+                                      cmd=cfg["cmd"], size=size, px=px, py=py) + "\n"
         else:
-            block += LABEL_TPL.format(text=TEXT[k], size=size,
-                                      halign=halign, valign=valign, px=px, py=py) + "\n"
-    return (FIXED_BLOCKS
+            block += LABEL_TPL.format(text=TEXT[k], size=size, px=px, py=py) + "\n"
+    conf = (FIXED_BLOCKS
             + "\n\n/* Widgets managed by lockscreen-style (SUPER+S) */\n\n"
             + block.strip() + "\n")
+    # guard: hyprlock's LAYOUT parser needs a comma, else position stays 0,0
+    for line in conf.splitlines():
+        if line.strip().startswith("position") and "," not in line:
+            raise RuntimeError("hyprlock position must be comma-separated: %r" % line)
+    return conf
+
+
+def _prep_images(data):
+    for k, cfg in IMAGE_CFG.items():
+        if data.get(k, {}).get("enabled"):
+            subprocess.run([cfg["cmd"]], shell=True, check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def save(data):
     os.makedirs(LOCK_DIR, exist_ok=True)
     with open(LOCK_JSON, "w") as f:
-        json.dump({"v": 2, "widgets": data}, f, indent=2)
+        json.dump({"v": 3, "widgets": data}, f, indent=2)
     if not os.path.exists(BACKUP) and os.path.exists(HL_CONF):
         shutil.copy2(HL_CONF, BACKUP)
-    if data.get("clockana", {}).get("enabled"):
-        subprocess.run(["~/.local/bin/lockclockana"], shell=True, check=False)
+    _prep_images(data)
     with open(HL_CONF, "w") as f:
         f.write(build_conf(data))
     subprocess.run(["notify-send", "-a", "lockscreen-style", "-u", "normal", "-t", "5000",
@@ -216,7 +205,6 @@ def save(data):
 
 
 def _T(key):
-    """Look a string up in the active language table (no fallback, no mixing)."""
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import i18n
@@ -225,18 +213,39 @@ def _T(key):
         return key
 
 
+def build_cli():
+    save(merged())
+    print("wrote %s" % HL_CONF)
+    return 0
+
+
+if "--build" in sys.argv:
+    sys.exit(build_cli())
+
+
+warnings.filterwarnings("ignore", module="gi")
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk
+
+
 class Manager(Gtk.Window):
     def __init__(self):
         self.T = _T
         super().__init__(title="Lock Screen Style")
-        self.set_default_size(820, 560)
-        self.data = {k: dict(DEFAULTS[k]) for k in KEYS}
-        loaded = load()
-        for k in KEYS:
-            self.data[k].update(loaded.get(k, {}))
+        self.set_default_size(860, 640)
+        # hard floor: 10 rows + hint + poslbl need ~545px; without this Hyprland
+        # sometimes maps the window short and GTK clips the rows to 1-2.
+        self.set_size_request(720, 560)
+        self.set_can_focus(True)
+        self.data = merged()
         self.active = None
+        self.dragging = False
+        self.grab = (0.0, 0.0)
         self.spins = {}
         self.checks = {}
+        self.rows = {}
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         root.set_margin_start(12)
@@ -245,13 +254,9 @@ class Manager(Gtk.Window):
         root.set_margin_bottom(12)
         self.add(root)
 
-        title = Gtk.Label(label=("Lock widgets are rendered INSIDE hyprlock "
-                                 "(it draws above every window, so real glass widgets can't "
-                                 "show there). Every desktop widget is here: enable it, drag "
-                                 "its box, set its size. Cookie Clock is an analog star rendered "
-                                 "as a PNG and re-drawn every 5s so the hands stay live. smart "
-                                 "pet and cava are graphical-only - hyprlock can't draw them. "
-                                 "Lock with SUPER+L to preview."))
+        title = Gtk.Label(label=("Lock Screen Widgets — drag the boxes to place them "
+                                 "(same as the desktop widget manager). Arrow keys "
+                                 "nudge precisely (Shift = fine step). SUPER+L to preview."))
         title.set_line_wrap(True)
         title.set_halign(Gtk.Align.START)
         root.pack_start(title, False, False, 0)
@@ -267,22 +272,28 @@ class Manager(Gtk.Window):
             chk = Gtk.CheckButton(label=NAMES[k])
             chk.set_active(bool(self.data[k].get("enabled")))
             row.pack_start(chk, True, True, 0)
-            sp = Gtk.SpinButton.new_with_range(14, 450, 1)
+            sp = Gtk.SpinButton.new_with_range(14, 600, 1)
             sp.set_value(int(self.data[k].get("size", DEFAULTS[k]["size"])))
             sp.set_width_chars(3)
-            row.pack_start(Gtk.Label(label=self.T("LS_PT")), False, False, 0)
             row.pack_start(sp, False, False, 0)
             lst.pack_start(row, False, False, 0)
             self.checks[k] = chk
             self.spins[k] = sp
+            self.rows[k] = row
 
         hint = Gtk.Label(label=self.T("LS_HINT"))
         hint.set_halign(Gtk.Align.START)
+        hint.set_line_wrap(True)
         hint.get_style_context().add_class("dim")
         lst.pack_start(hint, False, False, 0)
 
+        self.poslbl = Gtk.Label(label="")
+        self.poslbl.set_halign(Gtk.Align.START)
+        self.poslbl.get_style_context().add_class("dim")
+        lst.pack_start(self.poslbl, False, False, 0)
+
         self.da = Gtk.DrawingArea()
-        self.da.set_size_request(430, 250)
+        self.da.set_size_request(420, 240)
         self.da.set_events(Gdk.EventMask.BUTTON_PRESS_MASK |
                            Gdk.EventMask.BUTTON_RELEASE_MASK |
                            Gdk.EventMask.POINTER_MOTION_MASK)
@@ -299,16 +310,17 @@ class Manager(Gtk.Window):
         closeb.connect("clicked", lambda *a: self.destroy())
         btns.pack_start(applyb, False, False, 0)
         btns.pack_start(closeb, False, False, 0)
+        self.status = Gtk.Label(label="")
+        self.status.get_style_context().add_class("dim")
+        btns.pack_start(self.status, False, False, 8)
         root.pack_start(btns, False, False, 0)
 
         self.add_css()
+        self.connect("key-press-event", self.on_key)
 
     def add_css(self):
         p = Gtk.CssProvider()
-        p.load_from_data(b"""
-window { background: rgba(16,16,20,0.96); }
-.dim { color: rgba(230,230,235,0.6); font-size: 11px; }
-""")
+        p.load_from_data(b"window { background: rgba(16,16,20,0.96); }\n.dim { color: rgba(230,230,235,0.6); font-size: 11px; }")
         try:
             Gtk.StyleContext.add_provider_for_screen(self.get_screen(), p, 800)
         except Exception:
@@ -319,16 +331,18 @@ window { background: rgba(16,16,20,0.96); }
         ah = self.da.get_allocated_height()
         scale = min(aw / 1600.0, ah / 900.0)
         w, h = 1600 * scale, 900 * scale
-        ox = (aw - w) / 2
-        oy = (ah - h) / 2
-        return ox, oy, w, h
+        return (aw - w) / 2, (ah - h) / 2, w, h
 
-    def box_rect(self, e, ox, oy, w, h):
+    def box_rect(self, k, e, ox, oy, w, h):
         x = ox + e.get("x", 0.5) * w
         y = oy + e.get("y", 0.5) * h
-        size = e.get("size", 30)
-        bw = max(80, size * 3.2)
-        bh = max(30, size * 1.35)
+        size = int(e.get("size", DEFAULTS[k]["size"]))
+        s = w / 1600.0
+        if k in IMAGE_CFG:
+            bw = bh = size * s
+        else:
+            bw = max(100, size * 5.0 * s)
+            bh = max(28, size * 1.6 * s)
         return x, y, bw, bh
 
     def on_draw(self, da, ctx):
@@ -341,11 +355,18 @@ window { background: rgba(16,16,20,0.96); }
         ctx.set_line_width(1)
         ctx.rectangle(ox, oy, w, h)
         ctx.stroke()
+        ctx.set_source_rgba(1, 1, 1, 0.05)
+        for i in range(1, 10):
+            ctx.move_to(ox + w * i / 10.0, oy)
+            ctx.line_to(ox + w * i / 10.0, oy + h)
+            ctx.move_to(ox, oy + h * i / 10.0)
+            ctx.line_to(ox + w, oy + h * i / 10.0)
+        ctx.stroke()
         for k in KEYS:
             e = self.data.get(k, {})
             if not e.get("enabled"):
                 continue
-            x, y, bw, bh = self.box_rect(e, ox, oy, w, h)
+            x, y, bw, bh = self.box_rect(k, e, ox, oy, w, h)
             if k == self.active:
                 ctx.set_source_rgba(1, 0.9, 0.45, 0.95)
             else:
@@ -353,10 +374,10 @@ window { background: rgba(16,16,20,0.96); }
                 ctx.set_source_rgba(c[0], c[1], c[2], 0.9)
             r = 5
             ctx.new_path()
-            ctx.arc(x + r, y + r, r, 180 / 180 * 3.1415926, 270 / 180 * 3.1415926)
-            ctx.arc(x + bw - r, y + r, r, 270 / 180 * 3.1415926, 0)
-            ctx.arc(x + bw - r, y + bh - r, r, 0, 90 / 180 * 3.1415926)
-            ctx.arc(x + r, y + bh - r, r, 90 / 180 * 3.1415926, 180 / 180 * 3.1415926)
+            ctx.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+            ctx.arc(x + bw - r, y + r, r, 1.5 * math.pi, 2 * math.pi)
+            ctx.arc(x + bw - r, y + bh - r, r, 0, 0.5 * math.pi)
+            ctx.arc(x + r, y + bh - r, r, 0.5 * math.pi, math.pi)
             ctx.close_path()
             ctx.fill()
             ctx.set_source_rgba(0, 0, 0, 0.45)
@@ -367,48 +388,139 @@ window { background: rgba(16,16,20,0.96); }
 
     def pick(self, px, py):
         ox, oy, w, h = self.preview_geom()
-        for k in KEYS:
+        for k in reversed(KEYS):
             e = self.data.get(k, {})
             if not e.get("enabled"):
                 continue
-            x, y, bw, bh = self.box_rect(e, ox, oy, w, h)
+            x, y, bw, bh = self.box_rect(k, e, ox, oy, w, h)
             if x <= px <= x + bw and y <= py <= y + bh:
                 return k
         return None
+
+    def update_poslbl(self):
+        if not self.active:
+            self.poslbl.set_text("")
+            return
+        e = self.data.get(self.active, {})
+        self.poslbl.set_text("%s — x %.1f%%  y %.1f%%" % (
+            NAMES[self.active], e.get("x", 0.5) * 100, e.get("y", 0.5) * 100))
 
     def on_press(self, da, ev):
         k = self.pick(ev.x, ev.y)
         if k:
             self.active = k
-            da.queue_draw()
+            self.dragging = True
+            ox, oy, w, h = self.preview_geom()
+            e = self.data[k]
+            bx = ox + e.get("x", 0.5) * w
+            by = oy + e.get("y", 0.5) * h
+            self.grab = ((ev.x - bx) / max(1.0, w), (ev.y - by) / max(1.0, h))
+        else:
+            self.active = None
+            self.dragging = False
+        self.update_poslbl()
+        da.queue_draw()
         return True
 
     def on_release(self, da, ev):
-        self.active = None
-        da.queue_draw()
+        self.dragging = False
         return True
 
     def on_motion(self, da, ev):
-        if not self.active:
+        if not self.active or not self.dragging:
             return True
         ox, oy, w, h = self.preview_geom()
-        e = self.data[self.active]
-        e["x"] = round(max(0.0, min(1.0, (ev.x - ox) / w)), 3)
-        e["y"] = round(max(0.0, min(1.0, (ev.y - oy) / h)), 3)
+        e = self.data.setdefault(self.active, {})
+        ex = max(0.0, min(1.0, (ev.x - ox) / w - self.grab[0]))
+        ey = max(0.0, min(1.0, (ev.y - oy) / h - self.grab[1]))
+        e["x"] = round(ex, 4)
+        e["y"] = round(ey, 4)
+        self.update_poslbl()
         da.queue_draw()
         return True
+
+    def on_key(self, win, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.active = None
+            self.update_poslbl()
+            self.da.queue_draw()
+            return True
+        if not self.active:
+            return False
+        step = FINE if ev.state & Gdk.ModifierType.SHIFT_MASK else STEP
+        e = self.data.setdefault(self.active, {})
+        moved = False
+        if ev.keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
+            e["x"] = round(max(0.0, e.get("x", 0.5) - step), 4)
+            moved = True
+        elif ev.keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right):
+            e["x"] = round(min(1.0, e.get("x", 0.5) + step), 4)
+            moved = True
+        elif ev.keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
+            e["y"] = round(max(0.0, e.get("y", 0.5) - step), 4)
+            moved = True
+        elif ev.keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
+            e["y"] = round(min(1.0, e.get("y", 0.5) + step), 4)
+            moved = True
+        if moved:
+            self.update_poslbl()
+            self.da.queue_draw()
+        return moved
 
     def on_apply(self, *a):
         for k in KEYS:
             self.data[k]["enabled"] = bool(self.checks[k].get_active())
             self.data[k]["size"] = int(self.spins[k].get_value())
         save(self.data)
+        self.status.set_text(self.T("LS_SAVE"))
+        GLib.timeout_add(2500, lambda: (self.status.set_text(""), False)[1])
+
+
+GEOM_LOG = os.path.expanduser("~/.cache/lockscreen-style-geom.log")
+
+
+def geom_log(win):
+    """Dump the real allocations once the window is mapped.
+
+    Catches the "only the first row shows" bug with facts: is the window
+    short (clipping), are the rows present but 0-height, or missing entirely.
+    """
+    try:
+        import datetime
+        lines = ["=== %s ===" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+        w, h = win.get_size()
+        aw, ah = win.get_allocated_width(), win.get_allocated_height()
+        lines.append("window requested %dx%d  allocated %dx%d" % (w, h, aw, ah))
+        lines.append("rows in KEYS=%d  rows built=%d  checks=%d" % (
+            len(KEYS), len(win.rows), len(win.checks)))
+        for k in KEYS:
+            r = win.rows.get(k)
+            c = win.checks.get(k)
+            if r is None:
+                lines.append("  %-10s MISSING ROW" % k)
+                continue
+            a = r.get_allocation()
+            ca = c.get_allocation() if c is not None else None
+            lines.append("  %-10s row=%dx%d @%d,%d  chk=%s mapped=%s" % (
+                k, a.width, a.height, a.x, a.y,
+                ("%dx%d" % (ca.width, ca.height)) if ca else "?",
+                r.get_mapped()))
+        with open(GEOM_LOG, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as ex:
+        try:
+            with open(GEOM_LOG, "w") as f:
+                f.write("geom_log failed: %r\n" % (ex,))
+        except OSError:
+            pass
+    return False
 
 
 def main():
     win = Manager()
     win.connect("destroy", Gtk.main_quit)
     win.show_all()
+    GLib.timeout_add(800, lambda: (geom_log(win), False)[1])
     Gtk.main()
 
 

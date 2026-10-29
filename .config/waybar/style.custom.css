@@ -322,3 +322,20 @@
 .modules-right:hover {
     background-image: linear-gradient(to bottom, rgba(255,255,255,0.14), rgba(255,255,255,0.03) 45%, rgba(255,255,255,0));
 }
+
+/* X11 twin: xkeyboard-language uses the same pill as hyprland language */
+#xkeyboard-language {
+    color: #a6a9b0;
+    padding: 0 10px;
+    font-size: 12px;
+}
+#xkeyboard-language.active,
+#xkeyboard-language:focus {
+    color: #dfdfdf;
+}
+
+/* bspwm workspaces keep the same circular buttons as hyprland */
+#workspaces button.urgent {
+    background: #e5484d;
+    color: #ffffff;
+}

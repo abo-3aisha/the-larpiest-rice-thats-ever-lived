@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+# Print the "Day Clock" block for hyprlock: time, weekday, full date on three
+# lines. Mirrors ~/.local/bin/widget-clockday (which shows the same trio) but
+# as plain text because hyprlock can only draw text/images. Uses the rice's
+# active language + CLOCK/DATE formats so it follows the desktop.
+import os
+import sys
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+import i18n
+
+
+def main():
+    clock_fmt = i18n._conf_val("CLOCK") or "%H:%M"
+    clock = i18n.render(clock_fmt)
+    day = i18n.render("%a").upper()
+    date = i18n.render("%B %d %Y").upper()
+    sys.stdout.write("%s\n%s\n%s\n" % (clock, day, date))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

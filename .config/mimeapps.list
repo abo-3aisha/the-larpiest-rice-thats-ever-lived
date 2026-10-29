@@ -1,27 +1,29 @@
 [Added Associations]
 application/x-msdownload=wine.desktop;com.usebottles.bottles.desktop;
+application/zip=org.gnome.FileRoller.desktop;
 audio/mp4=vlc.desktop;org.kde.haruna.desktop;fr.handbrake.ghb.desktop;mpv.desktop;
 audio/mpeg=vlc.desktop;fr.handbrake.ghb.desktop;org.kde.haruna.desktop;mpv.desktop;
-image/png=org.kde.gwenview.desktop;firefox.desktop;satty.desktop;gimp.desktop;imv-dir.desktop;imv.desktop;zen.desktop;todoist.desktop;
-video/mp4=vlc.desktop;org.kde.haruna.desktop;mpv.desktop;fr.handbrake.ghb.desktop;
-image/jpeg=gimp.desktop;org.kde.gwenview.desktop;
-application/zip=org.gnome.FileRoller.desktop;
-audio/x-ms-wma=vlc.desktop;
 audio/vnd.wave=vlc.desktop;
+audio/x-ms-wma=vlc.desktop;
+image/jpeg=gimp.desktop;org.kde.gwenview.desktop;
+image/png=org.kde.gwenview.desktop;firefox.desktop;satty.desktop;gimp.desktop;imv-dir.desktop;imv.desktop;zen.desktop;todoist.desktop;
+image/webp=imv.desktop;ai.storyteller.photocraft.desktop;todoist.desktop;gimp.desktop;zen.desktop;firefox.desktop;imv-dir.desktop;org.kde.gwenview.desktop;
+video/mp4=vlc.desktop;org.kde.haruna.desktop;mpv.desktop;fr.handbrake.ghb.desktop;
 
 [Default Applications]
 application/x-ms-dos-executable=wine.desktop;
 application/x-msdownload=wine.desktop;
 application/x-wine-extension-exe=wine.desktop;
+application/zip=org.gnome.FileRoller.desktop
 audio/mp4=vlc.desktop;
 audio/mpeg=vlc.desktop;
+audio/vnd.wave=vlc.desktop
+audio/x-ms-wma=vlc.desktop
+image/jpeg=org.kde.gwenview.desktop
 image/png=org.kde.gwenview.desktop;
+image/webp=imv.desktop;
 inode/directory=dolphin.desktop
 text/plain=org.gnome.TextEditor.desktop;
 video/mp4=vlc.desktop;
 x-scheme-handler/http=firefox.desktop;
 x-scheme-handler/https=firefox.desktop;
-image/jpeg=org.kde.gwenview.desktop
-application/zip=org.gnome.FileRoller.desktop
-audio/x-ms-wma=vlc.desktop
-audio/vnd.wave=vlc.desktop

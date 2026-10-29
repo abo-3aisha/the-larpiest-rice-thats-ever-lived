@@ -231,6 +231,8 @@ def build_palette_from_pixels(pixels):
     mode = "dark" if (FORCE_DARK or mean_l < 0.5) else "light"
 
     accent, accent2 = accent_from_pixels(pixels)
+    if _is_grayscale_wall(pixels=pixels):
+        accent = accent2 = (0xDF, 0xDF, 0xDF)
 
     neutrals = sorted((c for c in clusters if hsl(c[1])[1] < 0.16), reverse=True)
 
@@ -363,6 +365,41 @@ def ensure_wal(wallpaper, force=False):
             pass
 
 
+def _wal_colors():
+    """Return pywal's color dict for the current wallpaper, or None."""
+    try:
+        data = json.load(open(Path(HOME) / ".cache" / "wal" / "colors.json"))
+        return data.get("colors")
+    except Exception:
+        return None
+
+
+def _is_grayscale_wall(colors=None, pixels=None):
+    """The wallpaper is PERCEPTUALLY grayscale (every grade between white and
+    black, possibly with a warm/cool cast) when ALL its wal colors are
+    near-neutral (absolute chroma < 0.10). Such walls MUST keep a neutral
+    accent: a single warm-tinted region (e.g. a white body on black shot with a
+    brown cast) would otherwise become the accent and paint the whole UI brown.
+    A genuinely colored wall (green/blue/purple/pastel) always produces at least
+    one wal color with real chroma -> stays colored. Falls back on a pixel
+    fraction test when no wal cache exists."""
+    if colors is not None:
+        for i in list(range(1, 7)) + list(range(9, 15)):
+            key = "color%d" % i
+            if key not in colors:
+                continue
+            r, g, b = wal_rgb(colors[key])
+            if (max(r, g, b) - min(r, g, b)) / 255.0 >= 0.10:
+                return False
+        return True
+    if pixels is not None:
+        n = max(1, len(pixels))
+        colored = sum(1 for rgb in pixels
+                      if (max(rgb) - min(rgb)) / 255.0 > 0.18)
+        return colored / n < 0.03
+    return True  # nothing to judge -> be safe and neutral
+
+
 def build_palette(wallpaper):
     ensure_wal(wallpaper)
     wal_theme = build_palette_from_wal(wallpaper)
@@ -373,6 +410,8 @@ def build_palette(wallpaper):
         pixels = None
     if pixels:
         accent, accent2 = accent_from_pixels(pixels)
+        if _is_grayscale_wall(colors=_wal_colors()) or _is_grayscale_wall(pixels=pixels):
+            accent = accent2 = (0xDF, 0xDF, 0xDF)
         if wal_theme is not None:
             a = tuple(accent)
             bg = wal_rgb(wal_theme["bg"])
@@ -1303,10 +1342,20 @@ def write_qt6ct_palette(theme):
             lines = qt6ct_conf.read_text().splitlines()
             target = str(conf_path)
             changed = False
-            for i, line in enumerate(lines):
-                if line.startswith("color_scheme_path=") and line != "color_scheme_path=" + target:
-                    lines[i] = "color_scheme_path=" + target
-                    changed = True
+
+            def setk(key, val):
+                nonlocal changed
+                for i, line in enumerate(lines):
+                    if line.startswith(key + "="):
+                        if line != key + "=" + val:
+                            lines[i] = key + "=" + val
+                            changed = True
+                        return
+                lines.append(key + "=" + val)
+                changed = True
+
+            setk("color_scheme_path", target)
+            setk("icon_theme", "WallpaperAccent")
             if changed:
                 diff_write(qt6ct_conf, "\n".join(lines) + "\n")
         except Exception:
@@ -1316,12 +1365,15 @@ def write_qt6ct_palette(theme):
 def sync_qt_scheme(theme, mode):
     name = write_kde_scheme(theme)
     write_qt6ct_palette(theme)
+    write_folder_icons(theme)
     accent_rgb = hx_rgb(theme["accent"])  # wallpaper accent, NOT a fixed orange
     if shutil.which("kwriteconfig6"):
         for group, key, value in (
             ("General", "ColorScheme", name),
             ("KDE", "ColorScheme", name),
             ("General", "AccentColor", accent_rgb),
+            ("Icons", "Theme", "WallpaperAccent"),
+            ("Icons", "ThemeFallback", "Tela-circle-purple-dark"),
         ):
             try:
                 subprocess.run(
@@ -1346,6 +1398,180 @@ def sync_gtk_scheme(mode):
             subprocess.run(cmd, capture_output=True)
         except Exception:
             pass
+
+
+FOLDER_SVG = re.compile(r"#([0-9a-fA-F]{6})\b")
+
+
+def _is_achromatic(accent):
+    """True when the accent has no usable hue (white/black/gray wallpaper).
+    Judged by ABSOLUTE chroma (max-min) so a near-black tone carrying a mere
+    1-2/255 tint still counts as neutral (HSV saturation and HLS saturation both
+    blow up for near-black and used to misclassify it as blue). Also catches
+    extreme lightness."""
+    r, g, b = wal_rgb(accent)
+    chroma = (max(r, g, b) - min(r, g, b)) / 255.0
+    _, al, _ = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    return chroma < 0.08 or al < 0.05 or al > 0.97
+
+
+def recolor_folder_svg(text, accent):
+    """Recolor Breeze folder SVGs to the wallpaper accent. Two token classes:
+    1) NEUTRAL grays (sat <= 0.16) are repainted with the accent hue, keeping
+       their lightness so the folder's shading ramp survives.
+    2) BLUE-family tokens (hue ~170-260) are ALSO repainted with the accent hue
+       (sat + lightness kept) — Breeze's default folder graphic is KDE-blue
+       (`#3daee9` etc.), and if we leave it alone the plain folder keeps an
+       obvious blue face that never follows the wallpaper (that was the bug).
+    Pure black/white and other vivid hues (green/red/yellow color-variant
+    folders) are left alone.
+    ACHROMATIC accents (white/black/gray wallpaper): there is no hue to apply,
+    and the old forced min-saturation (0.32) at hue 0 used to render a pale
+    maroon. Instead we stay fully neutral: light accents keep the light ramp
+    (white folder + dark tab = "white with black"), dark accents INVERT the
+    ramp (dark folder + light face = "black with white")."""
+    r, g, b = wal_rgb(accent)
+    ah, al, asat = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    achromatic = _is_achromatic(accent)
+
+    def remap(mo):
+        hx = mo.group(1).lower()
+        if hx in ("000000", "ffffff"):
+            return "#" + hx
+        r2, g2, b2 = (int(hx[i:i + 2], 16) for i in (0, 2, 4))
+        H, L, S = colorsys.rgb_to_hls(r2 / 255.0, g2 / 255.0, b2 / 255.0)
+        if S > 0.16 and not (170.0 <= H * 360.0 <= 260.0):
+            return "#" + hx
+        if achromatic:
+            out_L = L if al >= 0.5 else 1.0 - L
+            v = int(round(out_L * 255)) & 255
+            return "#%02x%02x%02x" % (v, v, v)
+        sat = max(asat, 0.32)
+        if L > 0.90:  # near-white highlights stay airy
+            sat = min(sat, 0.28)
+        nr, ng, nb = colorsys.hls_to_rgb(ah, L, sat)
+        return "#" + to_hex((nr * 255, ng * 255, nb * 255))
+
+    return FOLDER_SVG.sub(remap, text)
+
+
+ICON_THEME_DIR = Path(HOME) / ".local" / "share" / "icons" / "WallpaperAccent"
+BREEZE_PLACES = Path("/usr/share/icons/breeze/places")
+
+
+def _pick_breeze_src(name):
+    """Breeze stores each icon once per size dir (identical SVG content,
+    scaled). Return the highest-size copy so the single scalable icon below is
+    crisp at every size. Works for both flat (places/foo.svg) and nested
+    (places/22/foo.svg, places/48/foo.svg) layouts."""
+    cands = []
+    for p in BREEZE_PLACES.rglob(name):
+        try:
+            s = int(p.parent.name)
+        except ValueError:
+            s = 0
+        cands.append((s, p))
+    if not cands:
+        return None
+    return sorted(cands, reverse=True)[0][1]
+
+
+def _folder_icons_have_color(out):
+    """Scan a generated icon dir for any token with chroma > ~20/255. Used as a
+    self-check: with an ACHROMATIC accent every folder icon must be neutral
+    gray; colored leftovers mean a stale/previous accent made it into the
+    build (the bug that showed lavender/green folders on a white wallpaper)."""
+    colored = []
+    for p in sorted(out.glob("*.svg")):
+        try:
+            txt = p.read_text()
+        except Exception:
+            continue
+        for c in set(re.findall(r"#[0-9a-fA-F]{6}\b", txt)):
+            try:
+                r, g, b = (int(c[i:i + 2], 16) for i in (0, 2, 4))
+            except ValueError:
+                continue
+            if max(r, g, b) - min(r, g, b) > 20:
+                colored.append((p.name, c))
+    return colored
+
+
+def _wipe_qt_icon_caches():
+    """Qt/KDE cache theme icons in RAM + a persistent kcache DB. If we rewrite
+    icons on a wallpaper switch while Dolphin is closed, its NEXT launch read
+    the stale cached (old-color) versions — that's the 'folders stayed on the
+    previous wallpaper's color / went green' mystery. Wipe the persistent
+    cache after regenerating so every app relaunch reads the fresh SVGs."""
+    for cache in (Path(HOME) / ".cache" / "icon-cache.kcache",
+                  Path(HOME) / ".cache" / "kic",
+                  Path(HOME) / ".cache" / "qtshadercache"):
+        try:
+            if cache.is_dir():
+                shutil.rmtree(cache, ignore_errors=True)
+            elif cache.exists():
+                cache.unlink()
+        except Exception:
+            pass
+
+
+def write_folder_icons(theme):
+    """Build a tiny user icon theme 'WallpaperAccent' that inherits Breeze and
+    only overrides the FOLDER icons (folder*.svg + user-home) recolored to the
+    wallpaper accent. Set as the Qt/KDE icon theme so every folder follows the
+    wallpaper. Runs on every generate(), so a wallpaper change re-tints folders."""
+    accent = theme["accent"]
+    if not BREEZE_PLACES.is_dir():
+        return
+    out = ICON_THEME_DIR / "places"
+    ensure_dir(out)
+    remap = lambda text: recolor_folder_svg(text, accent)
+    found = 0
+    names = set(p.name for p in BREEZE_PLACES.rglob("folder*.svg") if p.is_file())
+    names |= set(n for n in ("user-home.svg", "user-desktop.svg", "inode-directory.svg")
+                 if (BREEZE_PLACES / n).exists() or any(BREEZE_PLACES.rglob(n)))
+    for name in sorted(names):
+        src = _pick_breeze_src(name)
+        if src is None:
+            continue
+        try:
+            text = src.read_text()
+        except Exception:
+            continue
+        diff_write(out / name, remap(text))
+        found += 1
+    if not found:
+        return
+    # A plain folder is rendered from the directory MIME icon (inode/directory),
+    # not 'folder' — Breeze maps it to the default folder look, so mirror our
+    # recolored folder.svg under that name. Without this the plain folders fall
+    # back to the parent theme and stay uncolored (while folder-documents etc.,
+    # matched directly, are tinted).
+    base = out / "folder.svg"
+    if base.exists():
+        diff_write(out / "inode-directory.svg", base.read_text())
+    sym = out / "folder-symbolic.svg"
+    if sym.exists():
+        diff_write(out / "inode-directory-symbolic.svg", sym.read_text())
+    diff_write(ICON_THEME_DIR / "index.theme",
+               "[Icon Theme]\n"
+               "Name=WallpaperAccent\n"
+               "Comment=Folder icons recolored to the wallpaper accent (generated by palette.py)\n"
+               "Inherits=Tela-circle-purple-dark,breeze\n"
+               "Directories=places\n\n"
+               "[places]\n"
+               "Size=48\n"
+               "Scale=1\n"
+               "MaxSize=512\n"
+               "MinSize=16\n"
+               "Type=Scalable\n")
+    # Self-check + fresh caches.
+    if _is_achromatic(accent):
+        leftovers = _folder_icons_have_color(out)
+        if leftovers:
+            print("ERROR: folder icons still colored with achromatic accent:",
+                  leftovers[:5], file=sys.stderr)
+    _wipe_qt_icon_caches()
 
 
 def rgba_from(hex6, alpha):
@@ -1451,17 +1677,64 @@ def reapply_locale():
                            capture_output=True)
 
 
-def reload():
-    live = bool(shutil.which("hyprctl"))
+def _pgrep(name):
+    return subprocess.run(["pgrep", "-x", name],
+                          capture_output=True).returncode == 0
+
+
+def _is_x11_rice():
+    """True when running inside the bspwm/X11 twin session.
+
+    The binary `hyprctl` always exists on this machine, so `which(hyprctl)`
+    alone is NOT proof of a live Hyprland — and a stale WAYLAND_DISPLAY can
+    linger in systemd --user after logout. Ground truth: no reachable Wayland
+    socket + bspwm running (or XDG_SESSION_TYPE=x11)."""
+    if shutil.which("bspc") and subprocess.run(
+            ["bspc", "wm", "-g"], capture_output=True).returncode == 0:
+        return True
+    if os.environ.get("XDG_SESSION_TYPE") == "x11":
+        return True
+    wd = os.environ.get("WAYLAND_DISPLAY")
+    if wd and not os.path.exists(os.path.join(
+            os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid()), wd)):
+        return True  # stale WAYLAND_DISPLAY from a dead Hyprland
+    return False
+
+
+def reload(tint_widgets=True):
+    """Re-theme the live desktop.
+
+    tint_widgets=False skips the heavy waybar/cava/widget restarts — used when
+    the accent did not actually change, so a wallpaper flip that keeps the same
+    palette no longer visibly restarts everything (the X11 twin made that very
+    obvious)."""
+    x11 = _is_x11_rice()
+    wayland = not x11 and bool(os.environ.get("WAYLAND_DISPLAY"))
+    # hyprctl exists on disk even under bspwm; only trust it on Wayland.
+    live = wayland and bool(shutil.which("hyprctl"))
     if live:
         subprocess.run(["hyprctl", "reload"], capture_output=True)
         reapply_locale()
-    if shutil.which("swaync-client"):
+    if wayland and shutil.which("swaync-client"):
         subprocess.run(["swaync-client", "-R"], capture_output=True)
         subprocess.run(["swaync-client", "-rs"], capture_output=True)  # style must reload too
-    if shutil.which("waybar") and subprocess.run(["pgrep", "-x", "waybar"], capture_output=True).returncode == 0:
+    # Always resurrect waybar if it is currently dead, but only hard-restart
+    # a RUNNING bar when the accent actually changed (tint_widgets) — a
+    # wallpaper flip between two same-accent images used to blink the bar
+    # for zero visual gain.
+    if shutil.which("waybar") and (tint_widgets or not _pgrep("waybar")):
         subprocess.run(["pkill", "-x", "waybar"], capture_output=True)
-        subprocess.Popen(["setsid", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if x11:
+            cfg = HOME + "/.config/waybar/config.x11"
+            sty = HOME + "/.config/waybar/style.css"
+            cmd = ["setsid", "waybar", "-c", cfg, "-s", sty]
+            if not os.path.isfile(cfg):
+                cmd = ["setsid", "waybar"]
+        else:
+            cmd = ["setsid", "waybar"]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not tint_widgets:
+        return
     if shutil.which("cava-dock") and Path(HOME, ".local", "bin", "cava-dock").is_file():
         # Respect the widget-manager toggle: only restart the EQ when enabled.
         wcfg = Path(HOME, ".config", "widgets", "widgets.json")
@@ -1502,12 +1775,21 @@ def reload():
     # actually run them, otherwise they come back dead and the desktop ends up
     # with nothing instead of the old (stale-coloured) copy.
     wa = HOME + "/.local/bin/widgets-apply"
-    if os.path.isfile(wa) and live and _gi_usable():
+    if os.path.isfile(wa) and (live or x11) and _gi_usable():
         subprocess.Popen(["setsid", wa, "--force-restart"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif os.path.isfile(wa) and not _gi_usable():
         print("palette.py: PyGObject unavailable here; leaving the widgets "
               "alone (run palette.py from your own terminal to re-tint them)")
+
+    # Quick Panel reads accent + CSS at startup only. It is a transient
+    # popup, but restarting it is cheap and guarantees the next SUPER+O
+    # (or net-speed click) comes up with the fresh accent + slide animation.
+    qp = HOME + "/.local/bin/quickpanel"
+    if os.path.isfile(qp) and _gi_usable():
+        subprocess.run(["pkill", "-f", "local/bin/quickpanel"],
+                       capture_output=True)
+        Path(HOME + "/.cache/quickpanel.pid").unlink(missing_ok=True)
 
 
 STATE = HOME + "/.cache/palette-state"
@@ -1532,11 +1814,26 @@ def _write_state(wallpaper, accent):
         pass
 
 
+def _current_theme_accent():
+    try:
+        t = Path(HOME, ".config", "hypr", "theme.lua").read_text()
+        m = re.search(r'accent\s*=\s*"([0-9a-fA-F]{6})', t)
+        return m.group(1).lower() if m else None
+    except Exception:
+        return None
+
+
 def apply(wallpaper, do_reload):
+    old_accent = _current_theme_accent()
     theme = build_palette(wallpaper)
     generate(theme)
     if do_reload:
-        reload()
+        # Restart widgets/waybar/cava ONLY when the accent actually changed.
+        # A flip between two wallpapers with the same accent (common with the
+        # achromatic/BW set) used to respawn everything for zero visual gain —
+        # on X11 that read as "the widgets restart every little while".
+        tint = (old_accent is None) or (theme["accent"].lower() != old_accent)
+        reload(tint_widgets=tint)
         # Marker for the --watch daemon: this wallpaper was generated AND
         # reloaded already, so it must not fire a second identical restart.
         # Record what the daemon reads back (hyprpaper.conf) rather than the

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# Widget Miku — cycling Miku kaomoji as its own small widget.
+# Widget Miku — cycling Miku kaomoji with a smooth crossfade between faces.
 import os
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.expanduser("~/.local/bin"))
-from widget_lib import mkwin, one_instance
+from widget_lib import mkwin, one_instance, make_flip, flip_set
 
 pidf = one_instance("miku")
 
@@ -17,18 +17,17 @@ win, box = mkwin("miku", """
 #mword { font-size: 17px; }
 """)
 
-lbl = Gtk.Label(label="")
-lbl.set_name("mword")
-box.pack_start(lbl, True, True, 0)
+stack = make_flip(box, "mword", "(・ω・)", ttype="fade", dur=420)
 
 
 def fetch():
-    r = subprocess.run(["/home/abo3aisha/.local/bin/miku-kaomoji"], capture_output=True, text=True)
+    r = subprocess.run(["/home/abo3aisha/.local/bin/miku-kaomoji"],
+                       capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else "(・ω・)"
 
 
 def tick():
-    lbl.set_text(fetch())
+    flip_set(stack, fetch())
     return True
 
 

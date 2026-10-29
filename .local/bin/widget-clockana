@@ -82,22 +82,32 @@ def hsla(h, s, l):
 
 ACCENT_RGB = _rgb(ACCENT)
 _ah, _as, _al = rgb2hsv(*ACCENT_RGB)
-_as = max(0.20, _as / 255.0 if _as <= 1 else _as)
+_as = _as / 255.0 if _as > 1 else _as
 _al = _al / 255.0 if _al > 1 else _al
-# If hex accent, hsv components above were raw 0-255; normalize.
 _ah = _ah % 360
+# Achromatic accent (white/black/gray wallpaper): hue is meaningless and a
+# forced min-saturation used to render a pink/maroon material face (same trap
+# as the folder icons). Judge by ABSOLUTE chroma (max-min) so near-black tones
+# with a 1-2/255 tint still count as neutral. Force the scheme to gray then.
+_chroma = (max(ACCENT_RGB) - min(ACCENT_RGB)) / 255.0
+ACHROMATIC = _chroma < 0.08 or _al < 0.05 or _al > 0.97
+
+
+def _sat(s):
+    return 0.0 if ACHROMATIC else s
+
 
 # ---- Material-ish dark scheme (colors derived from the wallpaper accent) ----
-PRIMARY = hsla(_ah, min(0.45 + _as * 0.4, 0.85), 0.82)            # hour hand, digits base
-FACE = hsla(_ah, min(0.25 + _as * 0.45, 0.60), 0.30)              # primaryContainer: cookie face
-SECONDARY = hsla(_ah, min(0.18 + _as * 0.3, 0.5), 0.80)
+PRIMARY = hsla(_ah, _sat(min(0.45 + _as * 0.4, 0.85)), 0.82)      # hour hand, digits base
+FACE = hsla(_ah, _sat(min(0.25 + _as * 0.45, 0.60)), 0.30)        # primaryContainer: cookie face
+SECONDARY = hsla(_ah, _sat(min(0.18 + _as * 0.3, 0.5)), 0.80)
 ON_FACE = mix(SECONDARY, FACE, 0.15)      # marks (colOnBackground) = 85% secondary + 15% container
 DIGIT = mix(FACE, PRIMARY, 0.45)          # colBackgroundInfo = 45% primary + 55% container
-TERTIARY = hsla(_ah + 150, min(0.45 + _as * 0.4, 0.85), 0.82)      # minute hand
-TERTIARY_CONTAINER = hsla(_ah + 150, min(0.25 + _as * 0.45, 0.60), 0.30)
-SECONDARY_CONTAINER = hsla(_ah, min(0.20 + _as * 0.4, 0.55), 0.32)
-ON_TERT = hsla(_ah + 150, 0.10, 0.88)
-ON_SEC = hsla(_ah, 0.10, 0.90)
+TERTIARY = hsla(_ah + 150, _sat(min(0.45 + _as * 0.4, 0.85)), 0.82)  # minute hand
+TERTIARY_CONTAINER = hsla(_ah + 150, _sat(min(0.25 + _as * 0.45, 0.60)), 0.30)
+SECONDARY_CONTAINER = hsla(_ah, _sat(min(0.20 + _as * 0.4, 0.55)), 0.32)
+ON_TERT = hsla(_ah + 150, _sat(0.10), 0.88)
+ON_SEC = hsla(_ah, _sat(0.10), 0.90)
 SHADOW = (0, 0, 0)
 
 win, box = mkwin("clockana", "")

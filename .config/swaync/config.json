@@ -70,7 +70,7 @@
                         "command": "/home/abo3aisha/.local/bin/swaync-action screenshot"
                     },
                     {
-                        "label": "  Screen record",
+                        "label": "  Screen record",
                         "type": "toggle",
                         "active": false,
                         "command": "/home/abo3aisha/.local/bin/swaync-action record",

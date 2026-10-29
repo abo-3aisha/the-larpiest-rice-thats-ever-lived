@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-# Widget Clock — floating glass clock (position/workspace managed by widgets-apply).
+# Widget Clock — floating glass clock with smooth text transitions:
+# the time ROLLS (slide up/down) every minute, the date CROSSFADES when
+# day/month/year change. Position/workspace managed by widgets-apply.
 import os
 import sys
-import time
-import i18n
 
 sys.path.insert(0, os.path.expanduser("~/.local/bin"))
-from widget_lib import mkwin, one_instance
+import i18n
+from widget_lib import mkwin, one_instance, make_flip, flip_set
 
 pidf = one_instance("clock")
 
@@ -19,20 +20,13 @@ win, box = mkwin("clock", """
 #wdate { font-size: 12px; color: rgba(241,241,243,0.72); }
 """)
 
-t = Gtk.Label()
-t.set_name("wtime")
-d = Gtk.Label()
-d.set_name("wdate")
-box.pack_start(t, True, True, 0)
-box.pack_start(d, False, False, 0)
+tstack = make_flip(box, "wtime", "", ttype="slide-up", dur=340)
+dstack = make_flip(box, "wdate", "", ttype="fade", dur=450)
 
 
 def tick():
-    now = i18n.render(i18n._conf_val("CLOCK") or "%H:%M")
-    today = i18n.render("%A %d %B")
-    if t.get_text() != now:
-        t.set_text(now)
-    d.set_text(today)
+    flip_set(tstack, i18n.render(i18n._conf_val("CLOCK") or "%H:%M"))
+    flip_set(dstack, i18n.render("%A %d %B"))
     return True
 
 

@@ -78,13 +78,11 @@ if [ "$ac" = "1" ]; then
         printf '{"text":"%s","class":["full","c%d"],"alt":"fully charged"}\n' "$BOLT" "$frame"
         exit 0
     fi
-    if [ "$status" = "Charging" ]; then
-        frame=$(( (10#$us / CHARGE_STEP_US) % CHARGE_FRAMES ))
-        printf '{"text":"%s","class":["charging","c%d"],"alt":"charging"}\n' "$BOLT" "$frame"
-        exit 0
-    fi
-    # Plugged in but neither charging nor full (a paused pack).
-    printf '{"text":"","class":["off"],"alt":"on ac, not charging"}\n'
+    # Charging, or the brief Discharging/Not-charging micro-pause at the
+    # top-off ceiling — the charger is still in, so keep the bolt breathing
+    # instead of hiding (which used to read as "disconnected").
+    frame=$(( (10#$us / CHARGE_STEP_US) % CHARGE_FRAMES ))
+    printf '{"text":"%s","class":["charging","c%d"],"alt":"charging"}\n' "$BOLT" "$frame"
     exit 0
 fi
 

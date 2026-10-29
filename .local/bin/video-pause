@@ -12,6 +12,21 @@
 # fire?" is answerable from the file alone (no asking the user).
 dbg() { printf '%s  %s\n' "$(date +%T)" "$*" >> "$HOME/.cache/video-pause.dbg" 2>/dev/null; }
 dbg "fired args=[$*]"
+# X11 twin: the video wallpaper is a root-window mpv (see apply-wallpaper)
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    pid=$(pgrep -x mpv | head -n 1)
+    if [ -z "$pid" ]; then
+        notify-send -t 2500 "Wallpaper" "No video wallpaper is playing" 2>/dev/null
+        exit 0
+    fi
+    state=$(ps -o state= -p "$pid" 2>/dev/null | awk '{print substr($1,1,1)}')
+    case "$state" in
+        T|t) kill -CONT "$pid" 2>/dev/null && notify-send -t 1500 "Wallpaper" "Video resumed" 2>/dev/null ;;
+        *)   kill -STOP "$pid" 2>/dev/null && notify-send -t 1500 "Wallpaper" "Video paused" 2>/dev/null ;;
+    esac
+    exit 0
+fi
+
 pid=$(pgrep -x mpvpaper | head -n 1)
 if [ -z "$pid" ]; then
     conf=$(sed -n 's/^wallpaper *= *[^,]*, *//p' \

@@ -17,7 +17,7 @@ menu=$(printf '%s\n' \
 
 mapfile -t rows < <(printf '%s\n' "$menu")
 sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$T_SES_TITLE" \
-        --lines 1 --columns 3 --width 520)
+        --height 110 --columns 3 --width 520)
 [ -z "$sel" ] && exit 0
 
 idx=-1
@@ -28,7 +28,7 @@ done
 case "$idx" in
     0)
         yes=$(printf '󰄬  %s\n󰅙  %s\n' "$T_SES_CONFIRM_YES" "$T_SES_CONFIRM_NO" \
-              | wofi --dmenu --prompt "$T_SES_LOGOUT_Q" --lines 1 --columns 2 --width 260)
+              | wofi --dmenu --prompt "$T_SES_LOGOUT_Q" --height 110 --columns 2 --width 260)
         [ -z "$yes" ] && exit 0
         mapfile -t yrows < <(printf '󰄬  %s\n󰅙  %s\n' "$T_SES_CONFIRM_YES" "$T_SES_CONFIRM_NO")
         yi=-1

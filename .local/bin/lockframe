@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+# Print a photo path for hyprlock's image widget and refresh the cached PNG.
+# hyprlock runs this via `reload_cmd` every reload_time seconds; we cycle
+# through a folder (round-robin, remembered in ~/.cache/lockframe.idx), decode
+# the next photo to ~/.cache/lockscreen-frame.png and print its path. If we
+# print nothing hyprlock keeps the previous frame.
+import glob
+import json
+import os
+import subprocess
+import sys
+
+CACHE = os.path.expanduser("~/.cache/lockscreen-frame.png")
+STATE = os.path.expanduser("~/.cache/lockframe.idx")
+WIDGETS = os.path.expanduser("~/.config/widgets/widgets.json")
+DEFAULT_DIR = os.path.expanduser("~/Pictures/Wallpapers")
+EXTS = ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp")
+
+
+def _dir():
+    try:
+        d = json.load(open(WIDGETS)).get("widgets", {}).get("frame", {}).get("dir")
+        if d and os.path.isdir(os.path.expanduser(d)):
+            return os.path.expanduser(d)
+    except Exception:
+        pass
+    return DEFAULT_DIR
+
+
+def _photos(d):
+    out = []
+    for e in EXTS:
+        out.extend(glob.glob(os.path.join(d, e)))
+        out.extend(glob.glob(os.path.join(d, e.upper())))
+    return sorted(set(out))
+
+
+def _read_idx():
+    try:
+        return int(open(STATE).read().strip() or 0)
+    except Exception:
+        return 0
+
+
+def _save_idx(i):
+    try:
+        with open(STATE, "w") as f:
+            f.write(str(i))
+    except OSError:
+        pass
+
+
+def _with_pil(src):
+    from PIL import Image
+    im = Image.open(src)
+    im = im.convert("RGB")
+    im.thumbnail((1280, 1280))
+    im.save(CACHE, "PNG", optimize=True)
+    return True
+
+
+def _with_ffmpeg(src):
+    r = subprocess.run(
+        ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", src,
+         "-vf", "scale='min(1280,iw)':-1", "-frames:v", "1", CACHE],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return r.returncode == 0 and os.path.exists(CACHE)
+
+
+def main():
+    photos = _photos(_dir())
+    if not photos:
+        return 1
+    i = _read_idx() % len(photos)
+    src = photos[i]
+    _save_idx((i + 1) % len(photos))
+
+    ok = False
+    try:
+        ok = _with_pil(src)
+    except Exception:
+        ok = False
+    if not ok:
+        ok = _with_ffmpeg(src)
+    if not ok:
+        return 1
+
+    sys.stdout.write(CACHE + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

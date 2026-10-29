@@ -10,7 +10,7 @@
 
 window#waybar {
     background: transparent;
-    color: #b2b6bb;
+    color: #e8e2e0;
 }
 
 window#waybar.hidden { opacity: 0.0; }
@@ -23,7 +23,7 @@ window#waybar.empty #window { background: none; }
 .modules-left,
 .modules-center,
 .modules-right {
-    background: rgba(35, 33, 31, 0.40);
+    background: rgba(33, 34, 42, 0.40);
     border: 1px solid rgba(255,255,255,0.10);
     border-radius: 18px;
     margin-top: 8px;
@@ -33,7 +33,7 @@ window#waybar.empty #window { background: none; }
 }
 .modules-left:hover,
 .modules-center:hover,
-.modules-right:hover { background: rgba(35, 33, 31, 0.55); }
+.modules-right:hover { background: rgba(33, 34, 42, 0.55); }
 .modules-left { margin-left: 10px; }
 .modules-right { margin-right: 10px; }
 
@@ -41,7 +41,7 @@ window#waybar.empty #window { background: none; }
 #custom-logo {
     font-size: 20px;
     padding: 0 10px 0 8px;
-    color: #d28665;
+    color: #dfdfdf;
 }
 
 /* ===== workspaces ===== */
@@ -52,13 +52,13 @@ window#waybar.empty #window { background: none; }
     border-radius: 12px;
 }
 #workspaces button.active {
-    background: #d28665;
-    color: #eff1f4;
+    background: #dfdfdf;
+    color: #111113;
 }
 #workspaces button:hover {
-    background: #23211f;
-    color: #d28665;
-    border: 1px solid #d28665;
+    background: #21222a;
+    color: #dfdfdf;
+    border: 1px solid #dfdfdf;
 }
 
 /* ===== generic modules ===== */
@@ -67,18 +67,18 @@ window#waybar.empty #window { background: none; }
     padding: 0 9px;
     margin: 1px 2px;
     border-radius: 12px;
-    color: #b2b6bb;
+    color: #e8e2e0;
 }
 
 #clock {
     font-weight: bold;
-    color: #b2b6bb;
+    color: #e8e2e0;
 }
-#clock:hover { color: #d28665; }
+#clock:hover { color: #dfdfdf; }
 
 #custom-language {
-    background: #d28665;
-    color: #eff1f4;
+    background: #dfdfdf;
+    color: #111113;
     border-radius: 12px;
     padding: 0 9px;
     margin: 1px 2px;
@@ -88,7 +88,7 @@ window#waybar.empty #window { background: none; }
     color: #a6a9b0;
 }
 #network:hover, #bluetooth:hover, #pulseaudio:hover, #battery:hover,
-#cpu:hover, #memory:hover, #temperature:hover { color: #d28665; }
+#cpu:hover, #memory:hover, #temperature:hover { color: #dfdfdf; }
 
 #battery.warning { color: #f08c00; }
 #battery.critical { color: #e5484d; }
@@ -104,47 +104,47 @@ window#waybar.empty #window { background: none; }
     color: #a6a9b0;
 }
 #tray > .active {
-    color: #b2b6bb;
+    color: #e8e2e0;
 }
 #tray > .needs-attention {
     background: #e5484d;
-    color: #eff1f4;
+    color: #111113;
 }
 
 /* ===== tooltip ===== */
 tooltip {
-    background: #100e0b;
-    border: 1px solid #d28665;
+    background: #0e0f17;
+    border: 1px solid #dfdfdf;
     border-radius: 12px;
-    color: #b2b6bb;
+    color: #e8e2e0;
 }
 tooltip label {
-    color: #b2b6bb;
+    color: #e8e2e0;
     font-size: 15px;
 }
 
 
 /* ===== persisted custom rules (auto re-appended by palette.py) ===== */
-/* NOTE: theme tokens (#d28665, #a6a9b0, #eff1f4, #23211f, #e5484d)
+/* NOTE: theme tokens (#dfdfdf, #a6a9b0, #111113, #21222a, #e5484d)
    are substituted by palette.py before appending, so the whole bar stays
    in sync with the wallpaper accent on every theme change. */
 
 /* circular workspace buttons (survives palette.py template regen) */
 #workspaces button { min-width: 20px; min-height: 20px; padding: 0; margin: 0 1px; color: #a6a9b0; border-radius: 50%; }
-#workspaces button.active { background: #d28665; color: #eff1f4; }
-#workspaces button:hover { background: #23211f; color: #d28665; border: 1px solid #d28665; }
+#workspaces button.active { background: #dfdfdf; color: #111113; }
+#workspaces button:hover { background: #21222a; color: #dfdfdf; border: 1px solid #dfdfdf; }
 
 /* discord layer (super+K): small icon beside active ws number */
 #custom-comm-layer { margin: 0; padding: 0; min-width: 0; font-size: 12px; color: transparent; }
-#custom-comm-layer.active { font-size: 12px; margin: 0 9px 0 2px; padding: 0; color: #d28665; }
-#custom-comm-layer:hover { color: #d28665; }
+#custom-comm-layer.active { font-size: 12px; margin: 0 9px 0 2px; padding: 0; color: #dfdfdf; }
+#custom-comm-layer:hover { color: #dfdfdf; }
 #custom-weather { color: #a6a9b0; }
-#custom-weather:hover { color: #d28665; }
-#custom-wifi { color: #d28665; }
-#custom-wifi:hover { color: #d28665; }
+#custom-weather:hover { color: #dfdfdf; }
+#custom-wifi { color: #dfdfdf; }
+#custom-wifi:hover { color: #dfdfdf; }
 #custom-wifi.off { color: #a6a9b0; opacity: 0.75; }
-#custom-wifi.off:hover { color: #d28665; }
-#custom-wifi.disconnected { color: #d28665; opacity: 0.8; }
+#custom-wifi.off:hover { color: #dfdfdf; }
+#custom-wifi.disconnected { color: #dfdfdf; opacity: 0.8; }
 
 /* net speed (whole-device up/down, centered before the clock) */
 #custom-net-speed {
@@ -153,7 +153,7 @@ tooltip label {
     padding: 0;
     color: #a6a9b0;
 }
-#custom-net-speed:hover { color: #d28665; }
+#custom-net-speed:hover { color: #dfdfdf; }
 #custom-net-speed.offline { color: transparent; }
 
 #custom-battery {
@@ -163,11 +163,11 @@ tooltip label {
     margin: 1px 8px 1px 0px;
     padding: 0;
     background-repeat: no-repeat;
-    color: #d28665;
+    color: #dfdfdf;
     font-size: 9px;
 }
-#custom-battery:hover { color: #d28665; }
-#custom-battery.charging { color: #d28665; }
+#custom-battery:hover { color: #dfdfdf; }
+#custom-battery.charging { color: #dfdfdf; }
 #custom-battery.critical { color: #e5484d; }
 #custom-battery label { font-size: 9px; padding: 0; }
 #custom-battery.b0 { background-image: url("/home/abo3aisha/.config/waybar/batt/g0.png"); }
@@ -386,7 +386,7 @@ tooltip label {
     background: transparent;
     min-width: 0;
 }
-#custom-bolt.charging { color: #d28665; }
+#custom-bolt.charging { color: #dfdfdf; }
 #custom-bolt.off { color: transparent; }
 
 /* Two curves, one continuous motion. The transition is what makes it smooth:
@@ -414,17 +414,17 @@ tooltip label {
 /* At 100%: a still, low glow. Two steps over 3s, so it barely moves — the
    absence of motion is the signal. Kept below the charging peak on purpose:
    "full" should read as quieter than "charging", not louder. */
-#custom-bolt.full { color: #d28665; }
+#custom-bolt.full { color: #dfdfdf; }
 #custom-bolt.full.c0 { opacity: 0.50; }
 #custom-bolt.full.c1 { opacity: 0.62; }
 
 /* ===== Material You tint (2026-09-26) ===== */
-#pulseaudio { color: #d28665; }
-#pulseaudio:hover { color: #d28665; }
-#custom-power { color: #d28665; }
+#pulseaudio { color: #dfdfdf; }
+#pulseaudio:hover { color: #dfdfdf; }
+#custom-power { color: #dfdfdf; }
 #custom-power:hover { color: #e5484d; }
-#tray { background: rgba(210, 134, 101, 0.08); border-radius: 16px; padding: 0 10px; margin: 1px 2px; }
-#tray:hover { background: rgba(210, 134, 101, 0.15); }
+#tray { background: rgba(223, 223, 223, 0.08); border-radius: 16px; padding: 0 10px; margin: 1px 2px; }
+#tray:hover { background: rgba(223, 223, 223, 0.15); }
 
 
 /* ===== liquid glass — touch-glass pass (2026-10-07) ===== */
@@ -440,11 +440,28 @@ tooltip label {
         inset 0 1px 0 rgba(255,255,255,0.30),
         0 0 0 1px rgba(255,255,255,0.05),
         0 6px 18px rgba(0,0,0,0.14),
-        0 0 16px rgba(210, 134, 101, 0.10);
+        0 0 16px rgba(223, 223, 223, 0.10);
 }
 .modules-left:hover,
 .modules-center:hover,
 .modules-right:hover {
     background-image: linear-gradient(to bottom, rgba(255,255,255,0.14), rgba(255,255,255,0.03) 45%, rgba(255,255,255,0));
+}
+
+/* X11 twin: xkeyboard-language uses the same pill as hyprland language */
+#xkeyboard-language {
+    color: #a6a9b0;
+    padding: 0 10px;
+    font-size: 12px;
+}
+#xkeyboard-language.active,
+#xkeyboard-language:focus {
+    color: #dfdfdf;
+}
+
+/* bspwm workspaces keep the same circular buttons as hyprland */
+#workspaces button.urgent {
+    background: #e5484d;
+    color: #ffffff;
 }
 

@@ -26,6 +26,7 @@ menu=$(printf '%s\n' \
     "󰤾  $T_CC_BRIGHT_DOWN" \
     "󰽥  $T_CC_NIGHT_LIGHT" \
     "󰔟  $T_CC_WIDGETS" \
+    "󰗘  $T_CC_ANIMATIONS" \
     "󰌾  $T_CC_LOCK_STYLE" \
     "󱠧  $T_CC_PRAYS" \
     "󰐥  $T_CC_RECORDING" \
@@ -34,7 +35,9 @@ menu=$(printf '%s\n' \
     "󰐥  $T_CC_POWER")
 
 prompt="$T_APP_CONTROL_CENTER 󰀄"
-sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$prompt" --lines 14 --width 380)
+# debug: record exactly what wofi is about to show (row count / labels)
+printf '%s\n' "$menu" > "$HOME/.cache/ctrl-center-menu.log" 2>&1
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$prompt" --height 620 --width 380)
 [ -z "$sel" ] && exit 0
 
 # index of the chosen line, so translated text never affects dispatch
@@ -46,7 +49,7 @@ done
 
 case "$pick" in
     0)  gui "$B/wifi-menu" ;;
-    1)  "$B/q-toggle" bt ;;
+    1)  gui "$B/bluetooth-menu" ;;
     2)  "$B/q-toggle" vol-up ;;
     3)  "$B/q-toggle" vol-down ;;
     4)  "$B/q-toggle" vol-mute ;;
@@ -54,11 +57,12 @@ case "$pick" in
     6)  "$B/q-toggle" bright-down ;;
     7)  "$B/q-toggle" night ;;
     8)  gui "$B/widget-manager" ;;
-    9)  gui "$B/lockscreen-style" ;;
-    10) gui "$B/my-prays" ;;
-    11) gui "$B/screen-rec-gui" ;;
-    12) gui "$B/language-and-time" ;;
-    13) gui "$B/performance-gui" ;;
-    14) gui "$B/power-menu" ;;
+    9)  gui "$B/animations-menu" ;;
+    10) gui "$B/lockscreen-style" ;;
+    11) gui "$B/my-prays" ;;
+    12) gui "$B/screen-rec-gui" ;;
+    13) gui "$B/language-and-time" ;;
+    14) gui "$B/performance-gui" ;;
+    15) gui "$B/power-menu" ;;
 esac
 exit 0

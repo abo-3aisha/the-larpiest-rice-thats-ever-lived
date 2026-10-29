@@ -134,12 +134,16 @@ def main():
 
     GLib.set_prgname("cava-dock")
     layer = False
-    try:
-        gi.require_version("GtkLayerShell", "0.1")
-        from gi.repository import GtkLayerShell
-        layer = True
-    except Exception:
-        pass
+    # Layer-shell is Wayland-only. On X11 force the plain-window fallback.
+    if not os.environ.get("WAYLAND_DISPLAY") and os.environ.get("DISPLAY"):
+        layer = False
+    else:
+        try:
+            gi.require_version("GtkLayerShell", "0.1")
+            from gi.repository import GtkLayerShell
+            layer = True
+        except Exception:
+            layer = False
 
     win = Gtk.Window()
     win.set_title("cava-dock")
@@ -181,7 +185,27 @@ def main():
         win.set_size_request(0, htarget)
     else:
         win.set_default_size(1600, htarget)
-        win.set_keep_above(True)
+        # X11: keep below apps + pin to bottom-center of the screen
+        try:
+            win.set_keep_below(True)
+        except Exception:
+            pass
+
+        def _place_bottom(*_a):
+            try:
+                geo = win.get_screen().get_monitor_geometry(
+                    win.get_screen().get_primary_monitor())
+                win.move(geo.x + max(0, (geo.width - 1600) // 2),
+                         geo.y + geo.height - htarget - 6)
+            except Exception:
+                pass
+            return False
+
+        try:
+            win.connect("realize", lambda *_: GLib.idle_add(_place_bottom))
+            GLib.idle_add(_place_bottom)
+        except Exception:
+            pass
 
     def on_draw(w, ctx):
         alloc = w.get_allocation()

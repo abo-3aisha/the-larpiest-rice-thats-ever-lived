@@ -1,10 +1,11 @@
 # Hyprland Rice
 
 A complete Hyprland desktop setup: every colour in the session — bars, menus,
-terminals, panels, Qt and GTK apps — is derived from the wallpaper by a single
-theme engine. Includes a wallpaper pipeline that treats images and video
-wallpapers identically, offline prayer times with the adhan, an Arabic/English
-interface switcher, and performance profiles.
+terminals, panels, Qt and GTK apps, even the folder icons — is derived from the
+wallpaper by a single theme engine. Includes a wallpaper pipeline that treats
+images and video wallpapers identically, a workspace-transition picker, a
+pixel-accurate lock-screen editor, offline prayer times with the adhan, an
+Arabic/English interface switcher, and performance profiles.
 
 ## 📸 Screenshots
 
@@ -20,7 +21,7 @@ interface switcher, and performance profiles.
 ├── README.md
 ├── screenshots/                   desktop shots (webp)
 ├── .config/hypr/                  Hyprland lua, rules, themes engine, hyprlock
-├── .config/rice/                  i18n + performance profile state
+├── .config/rice/                  i18n + performance + animation preset state
 ├── .config/{kitty,contour,cava,widgets,lockscreen,prayer,qt6ct}/
 ├── .local/bin/                    every helper script
 ├── .local/share/rice-lang/        UI translation catalogs
@@ -33,8 +34,18 @@ interface switcher, and performance profiles.
 
 **One theme engine.** `palette.py` reads the active wallpaper, picks the accent
 out of its actual pixels, and writes waybar, swaync, wofi, Contour, Kitty, foot,
-fish, cava, GTK and the KDE/Qt6 accent scheme. It runs on every wallpaper
-change — nothing else picks colours, so nothing can drift out of sync.
+fish, cava, GTK and the KDE/Qt6 accent scheme. It also rebuilds a tiny
+`WallpaperAccent` icon theme that recolours Breeze's folder SVGs — including the
+`inode-directory` MIME icon Dolphin actually draws — so even folders follow the
+wallpaper. Grayscale wallpapers keep a neutral accent instead of a stray warm
+tint. It runs on every wallpaper change — nothing else picks colours, so nothing
+can drift out of sync.
+
+**Workspace transitions, on demand.** `SUPER + S → Animations` opens a two-pane
+picker with ten presets (Classic Slide, Slide Fade, Snappy, Cinematic, Super
+Smooth, Abala Shell, …). Picking one writes `~/.config/rice/ws-anim.conf`, which
+`hyprland.lua` reads at startup — it drives both the workspace animation and
+`general.gaps_workspaces`, so the wallpaper can show between desktops.
 
 **Wallpapers, images and video alike.** `apply-wallpaper` is the only entry
 point for every wallpaper change. It hands `awww` a still — the image itself, or
@@ -58,9 +69,24 @@ Managed from the control center.
 a user systemd service, and the adhan plays through the mixer with a **Seen**
 button that stops it. The audio file ships in the repo.
 
-**Widgets.** A set of GTK glass widgets (clock, music, system, Miku, prayer,
-Hijri date) plus the Miku desktop pet. They sit on a real bottom layer, so they
-float above the wallpaper but under every window and show on all workspaces.
+**A wallpaper picker that works with the keyboard _and_ the mouse.**
+`SUPER + W` opens a fullscreen coverflow that starts on the current wallpaper
+and wraps forever. Arrow keys/Page keys flip, Enter applies, wheel scrolls, the
+pointer is only armed after it moves 8 px (a resting cursor cannot drive it),
+and hovering the left/right edge auto-browses. It restores its own focus, so
+typing/navigating never needs a mouse wiggle.
+
+**A lock screen you can lay out.** `SUPER + S → Lock Screen Style` edits
+hyprlock widgets on a WYSIWYG preview of the real monitor: drag without jump,
+arrow keys nudge 1 px (Shift = 10 px), and the generated `position` is exactly
+the widget's top-left. Widgets include the big weekday clock, cookie analog
+clock, date, Hijri date, next prayer, now-playing and a photo slideshow.
+
+**Widgets.** A set of GTK glass widgets (digital clock, big weekday clock, photo
+frame with six transitions, music, system, Miku, prayer, Hijri date, a playable
+T-Rex game) plus the Miku desktop pet. They sit on a real bottom layer, so they
+float above the wallpaper but under every window and show on all workspaces. All
+of them are draggable in `SUPER + S → Widgets`.
 
 ---
 
@@ -99,11 +125,11 @@ float above the wallpaper but under every window and show on all workspaces.
 
 | Keys | Action | Changes |
 |------|--------|---------|
-| `SUPER + W` | Wallpaper picker | Fullscreen glass carousel that **opens on the current wallpaper** and **wraps infinitely** in both directions; applies images **and** videos with the shared transition, then re-themes the session |
+| `SUPER + W` | Wallpaper picker | Fullscreen glass carousel that **opens on the current wallpaper** and **wraps infinitely** in both directions; wheel/edge auto-browse, click the centre card to apply; applies images **and** videos with the shared transition, then re-themes the session |
 | `SUPER + SHIFT + W` | Wallpaper slideshow | Toggles a 10-minute rotation through `~/Pictures/Wallpapers` |
 | `SUPER + P` | Pause/resume video wallpaper | Freezes mpvpaper on the exact frame (SIGSTOP); press again to resume, or it restarts a player that died |
 | `SUPER + N` | Notification center | Quick-settings tiles (Wi-Fi, Bluetooth, night light, volume, brightness, mic, screenshot, record) |
-| `SUPER + S` | Control center | Wallpaper, language, keyboard layout, performance, widgets, lock screen style, lock/logout |
+| `SUPER + S` | Control center | Wallpaper, Wi-Fi, Bluetooth, volume/brightness, language, keyboard layout, performance, widgets, animations, lock screen style, prayer, recording, lock/logout |
 | `SUPER + C` | Clipboard history | Restores the picked text or image to the clipboard |
 | `SUPER + SHIFT + C` | Color picker | |
 | `SUPER + KP_0` | Emoji picker | **Types** the emoji into the focused window (also `SUPER + KP_Insert`, since numpad0 reports both) |

@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+# Widget Frame — photo slideshow inside the glass widget. Cycles through
+# ~/Pictures/Wallpapers with 6 smooth random transitions (fade, slide
+# left/right/up/down, zoom-fade); never repeats the same transition or the
+# same image twice in a row. Transitions run on the GTK frame clock (vsync).
+import math
+import os
+import random
+import sys
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+import widget_lib
+from widget_lib import mkwin, one_instance, ease_out
+
+pidf = one_instance("frame")
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
+import cairo
+
+EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif")
+TRANS = ("fade", "slide-left", "slide-right", "slide-up", "slide-down", "zoom")
+DUR = 0.9          # seconds per transition
+INTERVAL = 8.0     # seconds on each photo
+DIR = None         # set from widgets.json below (default: Wallpapers)
+
+
+def list_images():
+    try:
+        return sorted(
+            os.path.join(DIR, n) for n in os.listdir(DIR)
+            if os.path.splitext(n)[1].lower() in EXT
+            and os.path.isfile(os.path.join(DIR, n)))
+    except OSError:
+        return []
+
+
+win, box = mkwin("frame", "")
+da = Gtk.DrawingArea()
+box.pack_start(da, True, True, 0)
+
+e = widget_lib.entry("frame")
+DIR = os.path.expanduser(str(e.get("dir") or "~/Pictures/Wallpapers"))
+sw, sh = widget_lib.monitor_size()
+W = max(80, int(sw * e.get("w", 0.2)))
+H = max(60, int(sh * e.get("h", 0.3)))
+da.set_size_request(W, H)
+try:
+    INTERVAL = max(3.0, float(e.get("interval", INTERVAL)))
+except (TypeError, ValueError):
+    pass
+
+_cache = {}          # path -> cairo.ImageSurface (cover-cropped, 2x)
+_state = {
+    "files": list_images(),
+    "cur": None,      # (path, surface)
+    "nxt": None,
+    "trans": "fade",
+    "t0": 0.0,        # transition start (monotonic)
+    "running": False,
+    "tick": None,
+    "last_t": None,
+}
+
+
+def load_surface(path):
+    """Wide images (aspect >= frame aspect, e.g. 16:9): center-crop to fill.
+    Everything else: fit the WHOLE image, letterboxed on the glass."""
+    key = (path, W, H)
+    if key in _cache:
+        return _cache[key]
+    try:
+        pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+            path, W * 2, H * 2, True)
+    except Exception:
+        return None
+    fw, fh = W * 2, H * 2
+    iw, ih = pb.get_width(), pb.get_height()
+    if iw <= 0 or ih <= 0:
+        return None
+    # the decode above is "contain" (iw<=fw, ih<=fh). Wide images are then
+    # upscaled to COVER (center of the image kept, sides cropped); other
+    # ratios keep their contain size so nothing is cut off.
+    if iw / float(ih) >= fw / float(fh):
+        k = max(fw / float(iw), fh / float(ih))
+    else:
+        k = 1.0
+    dw, dh = iw * k, ih * k
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, fw, fh)
+    ctx = cairo.Context(surf)
+    gs = Gdk.cairo_surface_create_from_pixbuf(pb, 1, None)
+    ctx.save()
+    ctx.translate((fw - dw) / 2.0, (fh - dh) / 2.0)
+    if k != 1.0:
+        ctx.scale(k, k)
+    ctx.set_source_surface(gs, 0, 0)
+    ctx.paint()
+    ctx.restore()
+    if len(_cache) > 8:
+        _cache.pop(next(iter(_cache)))
+    _cache[key] = surf
+    return surf
+
+
+def pick_next():
+    files = _state["files"]
+    if not files:
+        return None
+    choices = [f for f in files if not _state["cur"]
+               or f != _state["cur"][0]]
+    if not choices:
+        choices = files
+    return random.choice(choices)
+
+
+def pick_trans():
+    t = random.choice(TRANS)
+    if t == _state["last_t"] and len(TRANS) > 1:
+        t = random.choice([x for x in TRANS if x != _state["last_t"]])
+    _state["last_t"] = t
+    return t
+
+
+def _stop_tick():
+    if _state["tick"] is not None:
+        try:
+            da.remove_tick_callback(_state["tick"])
+        except Exception:
+            pass
+        _state["tick"] = None
+
+
+def _on_tick(widget, frame_clock):
+    p = (widget.get_frame_clock().get_frame_time() / 1e6 - _state["t0"]) / DUR
+    widget.queue_draw()
+    if p >= 1.0:
+        _state["cur"] = _state["nxt"]
+        _state["nxt"] = None
+        _state["running"] = False
+        _state["tick"] = None
+        return False
+    return True
+
+
+def advance(*a):
+    for _ in range(4):
+        path = pick_next()
+        if not path:
+            return True
+        surf = load_surface(path)
+        if surf is not None:
+            _state["nxt"] = (path, surf)
+            _state["trans"] = pick_trans()
+            _state["t0"] = GLib.get_monotonic_time() / 1e6
+            if not _state["running"]:
+                _state["running"] = True
+                _state["tick"] = da.add_tick_callback(_on_tick)
+            return True
+        # unreadable file — drop it and try another instead of
+        # waiting a full interval with nothing to show
+        _state["files"] = [f for f in _state["files"] if f != path]
+    return True
+
+
+def _round_rect(ctx, x, y, w, h, r):
+    r = min(r, w / 2, h / 2)
+    ctx.new_path()
+    ctx.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+    ctx.arc(x + w - r, y + r, r, 1.5 * math.pi, 2 * math.pi)
+    ctx.arc(x + w - r, y + h - r, r, 0, 0.5 * math.pi)
+    ctx.arc(x + r, y + h - r, r, 0.5 * math.pi, math.pi)
+    ctx.close_path()
+
+
+def on_draw(w, ctx):
+    aw = w.get_allocated_width()
+    ah = w.get_allocated_height()
+    ctx.set_operator(cairo.OPERATOR_CLEAR)
+    ctx.paint()
+    ctx.set_operator(cairo.OPERATOR_OVER)
+
+    _round_rect(ctx, 0, 0, aw, ah, 14)
+    ctx.clip()
+
+    cur = _state["cur"]
+    nxt = _state["nxt"]
+    if cur is None and nxt is None:
+        ctx.set_source_rgba(1, 1, 1, 0.06)
+        ctx.paint()
+        ctx.select_font_face("sans")
+        ctx.set_font_size(12)
+        ctx.set_source_rgba(1, 1, 1, 0.38)
+        ext = ctx.text_extents("No images")
+        ctx.move_to((aw - ext.width) / 2.0, ah / 2.0 + 4)
+        ctx.show_text("No images")
+        return False
+
+    p = 0.0
+    if nxt is not None and _state["running"]:
+        p = ease_out((GLib.get_monotonic_time() / 1e6 - _state["t0"]) / DUR)
+    t = _state["trans"] if nxt else "fade"
+
+    def paint(surf, dx=0.0, dy=0.0, alpha=1.0, scale=1.0):
+        if surf is None or alpha <= 0.003:
+            return
+        # surfaces are stored at 2x the widget size — scale them to cover
+        sw, sh = surf.get_width(), surf.get_height()
+        k = max(aw / float(sw), ah / float(sh)) * scale
+        ctx.save()
+        ctx.translate(aw / 2.0 + dx, ah / 2.0 + dy)
+        ctx.scale(k, k)
+        ctx.translate(-sw / 2.0, -sh / 2.0)
+        ctx.set_source_surface(surf, 0, 0)
+        ctx.paint_with_alpha(alpha)
+        ctx.restore()
+
+    if nxt is None or not _state["running"]:
+        paint(cur[1] if cur else None)
+    elif t == "fade":
+        paint(cur[1] if cur else None, alpha=1.0 - p)
+        paint(nxt[1], alpha=p)
+    elif t == "slide-left":
+        paint(cur[1] if cur else None, dx=-p * aw)
+        paint(nxt[1], dx=(1.0 - p) * aw)
+    elif t == "slide-right":
+        paint(cur[1] if cur else None, dx=p * aw)
+        paint(nxt[1], dx=-(1.0 - p) * aw)
+    elif t == "slide-up":
+        paint(cur[1] if cur else None, dy=-p * ah)
+        paint(nxt[1], dy=(1.0 - p) * ah)
+    elif t == "slide-down":
+        paint(cur[1] if cur else None, dy=p * ah)
+        paint(nxt[1], dy=-(1.0 - p) * ah)
+    elif t == "zoom":
+        paint(cur[1] if cur else None, alpha=1.0 - p)
+        paint(nxt[1], alpha=p, scale=0.84 + 0.16 * p)
+    return False
+
+
+INTERVAL_SRC = None
+
+
+def restart_interval():
+    """(Re)arm the auto-advance timer — clicking also resets it so a photo
+    still gets its full INTERVAL seconds after a manual switch."""
+    global INTERVAL_SRC
+    if INTERVAL_SRC is not None:
+        try:
+            GLib.source_remove(INTERVAL_SRC)
+        except Exception:
+            pass
+    INTERVAL_SRC = GLib.timeout_add(int(INTERVAL * 1000), advance)
+
+
+def on_click(w, ev):
+    # click anywhere on the photo = show the next one (ignored mid-transition)
+    if not _state["running"]:
+        advance()
+        restart_interval()
+    return True
+
+
+def on_destroy(*a):
+    _stop_tick()
+    try:
+        os.unlink(pidf)
+    except OSError:
+        pass
+    Gtk.main_quit()
+
+
+da.set_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+da.connect("draw", on_draw)
+da.connect("button-press-event", on_click)
+GLib.timeout_add(60000, lambda: (_state.update(files=list_images()), True)[1])
+restart_interval()
+advance()
+win.connect("destroy", on_destroy)
+win.show_all()
+Gtk.main()

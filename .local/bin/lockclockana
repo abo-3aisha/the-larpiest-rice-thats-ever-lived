@@ -233,6 +233,9 @@ def render(now):
 if __name__ == "__main__":
     try:
         render(time.localtime())
+        # hyprlock reads reload_cmd's STDOUT to decide what to reload; printing
+        # nothing makes it skip the update (image hands would stay frozen).
+        print(OUT)
     except Exception:
         import traceback
         traceback.print_exc()

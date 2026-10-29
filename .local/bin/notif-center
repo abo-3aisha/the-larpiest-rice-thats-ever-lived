@@ -1,6 +1,39 @@
 #!/usr/bin/env bash
 # Notification center / quick-settings panel toggle (SUPER+N).
 # Starts swaync if it is down, reloads config+styles, then toggles the panel.
+# X11 twin: no swaync — show dunst history in rofi (dismiss-all with right-click).
+
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    if ! command -v dunst >/dev/null 2>&1; then
+        notify-send -u critical "Notifications" "dunst is not installed" 2>/dev/null
+        exit 1
+    fi
+    # ensure daemon
+    pgrep -x dunst >/dev/null 2>&1 || { dunst >/dev/null 2>&1 & sleep 0.3; }
+    hist="$(dunstctl history 2>/dev/null | python3 -c '
+import json,sys
+try:
+    items = json.load(sys.stdin)
+except Exception:
+    items = []
+for it in items:
+    d = it.get("data", {})
+    app = d.get("appname", "?")
+    summ = d.get("summary", "").replace("\n", " ")
+    body = (d.get("body") or "").replace("\n", " ")[:80]
+    print("%s  %s — %s" % (app, summ, body))
+' 2>/dev/null)"
+    if [ -z "$hist" ]; then
+        notify-send -u low -t 2000 "Notifications" "No notifications" 2>/dev/null
+        exit 0
+    fi
+    sel="$(printf '%s\n' "$hist" | wofi --dmenu --prompt "Notifications 󰂚" --height 400 --width 480 2>/dev/null)"
+    if [ -n "$sel" ] && printf '%s' "$sel" | grep -qi "clear\|\[x\]"; then
+        dunstctl clear-all 2>/dev/null
+    fi
+    exit 0
+fi
+
 if ! command -v swaync >/dev/null 2>&1 || ! command -v swaync-client >/dev/null 2>&1; then
     command -v notify-send >/dev/null 2>&1 && \
         notify-send -t 4000 -u critical "$T_APP_NOTIFICATION_CENTER" "$T_NC_NO_SWAYNC: sudo pacman -S swaync" 2>/dev/null

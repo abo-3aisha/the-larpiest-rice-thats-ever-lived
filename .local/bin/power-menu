@@ -31,7 +31,7 @@ menu=$(printf '%s\n' \
     "───" \
     "$gstate  ($T_PM_TOGGLE)")
 
-sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$T_APP_POWER 󰚥" --lines 8)
+sel=$(printf '%s\n' "$menu" | wofi --dmenu --prompt "$T_APP_POWER 󰚥" --height 348)
 [ -z "$sel" ] && exit 0
 
 mapfile -t rows < <(printf '%s\n' "$menu")

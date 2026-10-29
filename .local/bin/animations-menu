@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+# animations-menu — workspace-transition picker (SUPER+S > Animations).
+# Two panes: categories on the LEFT, style presets on the RIGHT.
+# Click / Enter a preset -> writes ~/.config/rice/ws-anim.conf -> hyprctl reload.
+# hyprland.lua reads that file and feeds hl.animation (speed = deciseconds).
+import os
+import re
+import sys
+import time
+import warnings
+import subprocess
+
+warnings.filterwarnings("ignore", module="gi")
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk
+
+HOME = os.path.expanduser("~")
+CONF = HOME + "/.config/rice/ws-anim.conf"
+THEME = HOME + "/.config/hypr/theme.lua"
+LOG = HOME + "/.cache/animations-menu.log"
+
+
+def _log(msg):
+    try:
+        with open(LOG, "a") as fh:
+            fh.write(time.strftime("%H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+
+
+def hypr_reload():
+    """Reload the compositor config; return (rc, output). Logged so a silent
+    failure is never invisible again."""
+    import shutil
+    exe = shutil.which("hyprctl") or "/usr/bin/hyprctl"
+    try:
+        p = subprocess.run([exe, "reload"], capture_output=True, timeout=8)
+        out = (p.stdout + p.stderr).decode(errors="replace").strip()
+        return p.returncode, out
+    except Exception as exc:  # noqa: BLE001 - report anything, never swallow
+        return -1, repr(exc)
+
+# name, style, bezier, speed, speed_in, description, gaps_workspaces
+# speed = duration in deciseconds (Hyprland wiki): 1.8 = 180ms, higher = slower.
+# gaps = gap between workspaces in px (0 = they touch; >0 shows the wallpaper
+# between them while switching). Valid styles: slide, slidevert, fade,
+# slidefade, slidefadevert.
+PRESETS = [
+    ("Classic Slide", "slide", "easeOutQuint", 1.8, 1.6,
+     "Horizontal slide — the original", 0),
+    ("Slide Fade", "slidefade 15%", "easeOutQuint", 1.8, 1.6,
+     "Slide with a soft fade", 0),
+    ("Vertical Slide", "slidevert", "easeOutQuint", 1.8, 1.6,
+     "Workspaces move up / down", 0),
+    ("Vertical Slide Fade", "slidefadevert 15%", "easeOutQuint", 1.8, 1.6,
+     "Vertical slide with a soft fade", 0),
+    ("Fade", "fade", "easeOutQuint", 1.8, 1.6,
+     "Pure fade — no movement", 0),
+    ("Snappy", "slide", "easeOutQuint", 1.0, 1.0,
+     "Faster and tighter (100ms)", 0),
+    ("Cinematic", "slidefade 15%", "easeOutQuint", 3.2, 2.8,
+     "Slow, calm and floaty", 0),
+    ("Super Smooth", "slidefade 12%", "superSmooth", 2.6, 2.4,
+     "Buttery glide — soft and floaty", 0),
+    ("Super Smooth Vertical", "slidefadevert 12%", "superSmooth", 2.6, 2.4,
+     "Same buttery glide, top to bottom", 0),
+    ("Abala Shell", "slide", "abala.standard", 6.0, 6.0,
+     "Workspace gap + slow eased slide (LarperX2000's Abala)", 18),
+    ("Abala Shell Vertical", "slidevert", "abala.standard", 6.0, 6.0,
+     "Same Abala look, top to bottom", 18),
+]
+
+# category key -> i18n key of its label. More categories can be added here.
+CATEGORIES = [("workspaces", "ANIM_CAT_WS")]
+
+
+def _T(key):
+    """Look a string up in the active language table (no fallback, no mixing)."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import i18n
+        return i18n.t(key)
+    except Exception:
+        return key
+
+
+def theme_accent():
+    try:
+        m = re.search(r'accent\s*=\s*"([0-9a-fA-F]{6})"', open(THEME).read())
+        return "#" + m.group(1)
+    except Exception:
+        return "#00d4f5"
+
+
+def load_conf():
+    d = {"NAME": "Classic Slide"}
+    try:
+        for line in open(CONF):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip().strip('"')
+    except OSError:
+        pass
+    return d
+
+
+def save_conf(preset):
+    name, style, curve, speed, speed_in, _desc, gaps = preset
+    with open(CONF, "w") as fh:
+        fh.write("# rice: workspace transition preset -- written by animations-menu\n")
+        fh.write("# speed = duration in deciseconds (1.8 = 180ms, higher = slower).\n")
+        fh.write("# gaps = gap between workspaces in px (0 = they touch).\n")
+        fh.write('NAME="%s"\n' % name)
+        fh.write('STYLE="%s"\n' % style)
+        fh.write('BEZIER="%s"\n' % curve)
+        fh.write("SPEED=%s\n" % speed)
+        fh.write("SPEED_IN=%s\n" % speed_in)
+        fh.write("GAPS=%s\n" % gaps)
+
+
+class AnimMenu:
+    def __init__(self):
+        self.T = _T
+        self.acc = theme_accent()
+        self.active_name = load_conf().get("NAME", "Classic Slide")
+        self.last_apply = ("", 0.0)
+
+        self.win = Gtk.Window(title=self.T("CC_ANIMATIONS"))
+        self.win.set_default_size(640, 430)
+        self.win.set_position(Gtk.WindowPosition.CENTER)
+        self.win.connect("key-press-event", self.on_key)
+        self.win.connect("destroy", lambda *_: Gtk.main_quit())
+
+        css = Gtk.CssProvider()
+        cssdata = (
+            "window { background: #161617; }"
+            "label.title { font-size: 16px; font-weight: bold; color: %s; }"
+            "label.hint { font-size: 11px; color: #8a8d95; padding-bottom: 4px; }"
+            "label.pname { font-size: 13px; font-weight: bold; color: #ebde98; }"
+            "label.pdesc { font-size: 11px; color: #8a8d95; }"
+            "label.cat { font-size: 13px; font-weight: bold; color: #ebde98; }"
+            "list { background: transparent; }"
+            "list row { border-radius: 8px; padding: 7px 9px; }"
+            "list row:hover { background: #232326; }"
+            "list row:selected { background: #2f2f36; }"
+            "list row.active { background: %s; }"
+            "list row.active label.pname, list row.active label.cat"
+            " { color: #101012; }"
+            "list row.active label.pdesc { color: #101012; }"
+            "separator { background: #2a2a2e; min-width: 1px; }"
+        ) % (self.acc, self.acc)
+        css.load_from_data(cssdata.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        box.set_margin_top(16)
+        box.set_margin_bottom(14)
+        self.win.add(box)
+
+        title = Gtk.Label(label=self.T("CC_ANIMATIONS"))
+        title.get_style_context().add_class("title")
+        title.set_xalign(0.0)
+        box.add(title)
+
+        hint = Gtk.Label(label=self.T("ANIM_HINT"))
+        hint.get_style_context().add_class("hint")
+        hint.set_xalign(0.0)
+        box.add(hint)
+
+        pane = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.pack_start(pane, True, True, 0)
+
+        # LEFT: categories
+        self.cat_list = Gtk.ListBox()
+        self.cat_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.cat_list.connect("row-selected", self.on_cat_selected)
+        cat_scroll = Gtk.ScrolledWindow()
+        cat_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        cat_scroll.set_size_request(170, -1)
+        cat_scroll.set_vexpand(True)
+        cat_scroll.add(self.cat_list)
+        pane.pack_start(cat_scroll, False, True, 0)
+
+        vsep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        pane.pack_start(vsep, False, False, 0)
+
+        # RIGHT: presets for the selected category
+        self.pre_list = Gtk.ListBox()
+        self.pre_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        # Mouse: press-event + the row UNDER the cursor. Relying on the list's
+        # selection was the bug: on button-release GTK had not yet moved the
+        # selection, so every click applied the previously-selected row
+        # (always the first one). Keyboard (Enter/Space) still uses activation.
+        self.pre_list.set_activate_on_single_click(False)
+        self.pre_list.connect("button-press-event", self.on_preset_pressed)
+        self.pre_list.connect("row-activated", self.on_preset_activated)
+        pre_scroll = Gtk.ScrolledWindow()
+        pre_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        pre_scroll.set_vexpand(True)
+        pre_scroll.add(self.pre_list)
+        pane.pack_start(pre_scroll, True, True, 0)
+
+        self._build_categories()
+        self._build_presets()
+        self.win.show_all()
+        self.pre_list.grab_focus()
+
+    # ---- builders ----
+    def _build_categories(self):
+        for key, i18n_key in CATEGORIES:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            lbl = Gtk.Label(label=self.T(i18n_key), xalign=0.0)
+            lbl.get_style_context().add_class("cat")
+            box.add(lbl)
+            row.add(box)
+            row.cat_key = key
+            self.cat_list.add(row)
+        self.cat_list.show_all()
+        first = self.cat_list.get_row_at_index(0)
+        if first:
+            self.cat_list.select_row(first)
+
+    def _build_presets(self):
+        for child in self.pre_list.get_children():
+            self.pre_list.remove(child)
+        active = self.active_name
+        select_row = None
+        for preset in PRESETS:
+            name, style, curve, speed, speed_in, desc, gaps = preset
+            row = Gtk.ListBoxRow()
+            row.preset = preset
+            vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            label = ("✓ " if name == active else "") + name
+            pname = Gtk.Label(label=label, xalign=0.0)
+            pname.get_style_context().add_class("pname")
+            gapnote = "   ·   gap %dpx" % gaps if gaps else ""
+            pdesc = Gtk.Label(label="%s   ·   %s   ·   %.1fs%s"
+                              % (desc, style, speed, gapnote), xalign=0.0)
+            pdesc.get_style_context().add_class("pdesc")
+            vb.add(pname)
+            vb.add(pdesc)
+            row.add(vb)
+            if name == active:
+                row.get_style_context().add_class("active")
+                select_row = row
+            self.pre_list.add(row)
+        self.pre_list.show_all()
+        self.pre_list.select_row(select_row or self.pre_list.get_row_at_index(0))
+
+    # ---- events ----
+    def on_cat_selected(self, _list, row):
+        if row is None:
+            return
+        self._build_presets()
+
+    def on_preset_activated(self, _list, row):
+        self._apply(row)
+
+    def on_preset_pressed(self, _list, ev):
+        if getattr(ev, "button", 0) != 1:
+            return False
+        row = self.pre_list.get_row_at_y(int(ev.y))
+        if row is not None:
+            self.pre_list.select_row(row)
+            self._apply(row)
+        return False
+
+    def on_key(self, _w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.win.destroy()
+            return True
+        return False
+
+    # ---- apply ----
+    def _apply(self, row):
+        preset = getattr(row, "preset", None)
+        if preset is None:
+            return
+        name = preset[0]
+        now = time.monotonic()
+        if name == self.last_apply[0] and now - self.last_apply[1] < 0.6:
+            return  # a double-click fires release + activated — apply once
+        self.last_apply = (name, now)
+
+        save_conf(preset)
+        self.active_name = name
+        rc, out = hypr_reload()
+        _log("apply name=%r style=%r speed=%s -> hyprctl rc=%s %s"
+             % (name, preset[1], preset[3], rc, out))
+        body = self.T("ANIM_SUMMARY").format(name=name)
+        urgency = "normal"
+        if rc != 0:
+            urgency = "critical"
+            body = body + "  —  reload failed (rc=%s): %s" % (rc, out or "no output")
+        subprocess.Popen(
+            ["notify-send", "-a", self.T("CC_ANIMATIONS"), "-i",
+             "preferences-desktop", "-u", urgency, body])
+        self._build_presets()
+
+
+if __name__ == "__main__":
+    try:
+        AnimMenu()
+        Gtk.main()
+    except Exception:
+        import traceback
+        log = os.path.expanduser("~/.cache/animations-menu.log")
+        with open(log, "a") as fh:
+            fh.write(traceback.format_exc())
+        subprocess.Popen(
+            ["notify-send", "-a", "Animations", "-u", "critical",
+             "Animations menu failed", "See %s" % log])
+        sys.exit(1)

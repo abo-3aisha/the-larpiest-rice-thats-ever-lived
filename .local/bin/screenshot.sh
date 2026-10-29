@@ -1,10 +1,38 @@
 #!/bin/sh
 # screenshot.sh [region|window|output]
 # Saves to ~/Pictures/Screenshots/ AND copies the PNG to the clipboard.
+# Wayland: hyprshot/grim. X11: maim (+ slop for region, xdotool for window).
 DIR="$HOME/Pictures/Screenshots"
 mkdir -p "$DIR"
 MODE="${1:-region}"
 FILE="$DIR/$(date +%Y-%m-%d_%H-%M-%S).png"
+
+# ---- X11 twin path ----
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    case "$MODE" in
+        window)
+            maim --window="$(xdotool getactivewindow)" "$FILE" 2>/dev/null
+            ;;
+        output)
+            maim "$FILE" 2>/dev/null
+            ;;
+        *)
+            G="$(slop -f '%g' 2>/dev/null)"
+            [ -n "$G" ] && maim -g "$G" "$FILE" 2>/dev/null
+            ;;
+    esac
+    if [ -s "$FILE" ]; then
+        if command -v xclip >/dev/null 2>&1; then
+            xclip -selection clipboard -t image/png -i "$FILE"
+        elif command -v xsel >/dev/null 2>&1; then
+            xsel --clipboard --input < "$FILE"
+        fi
+        notify-send -a "Screenshot" -i "$FILE" "Screenshot saved" "$(basename "$FILE") — also in clipboard"
+    else
+        notify-send -a "Screenshot" -u critical "Screenshot failed" "maim/slop could not capture"
+    fi
+    exit 0
+fi
 
 case "$MODE" in
     window)

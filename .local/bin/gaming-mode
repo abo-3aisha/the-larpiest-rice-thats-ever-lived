@@ -7,6 +7,62 @@ NS="notify-send -u low -t 3500"
 
 hy() { hyprctl "$@"; }
 
+# ---- X11 twin: toggle picom + collapse gaps (same UX, different knobs) ----
+x11_gaming_on() {
+    pkill -x picom 2>/dev/null
+    bspc config window_gap 0 2>/dev/null
+    bspc config border_width 0 2>/dev/null
+    bspc config top_padding 24 2>/dev/null
+    bspc config bottom_padding 2 2>/dev/null
+    bspc config left_padding 2 2>/dev/null
+    bspc config right_padding 2 2>/dev/null
+}
+x11_gaming_off() {
+    command -v picom >/dev/null 2>&1 && \
+        picom --config "$HOME/.config/bspwm/picom.conf" -b 2>/dev/null || true
+    bspc config window_gap 6 2>/dev/null
+    bspc config border_width 2 2>/dev/null
+    bspc config top_padding 46 2>/dev/null
+    bspc config bottom_padding 8 2>/dev/null
+    bspc config left_padding 12 2>/dev/null
+    bspc config right_padding 12 2>/dev/null
+}
+
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "${DISPLAY:-}" ]; then
+    case "${1:-toggle}" in
+        on)
+            if [ -s "$STATE" ]; then
+                $NS "Gaming already ON" ""
+            else
+                : > "$STATE"
+                x11_gaming_on
+                $NS "Gaming Mode ON" "picom off / gaps 0 / borders 0"
+            fi
+            ;;
+        off)
+            if [ -s "$STATE" ]; then
+                rm -f "$STATE"
+                x11_gaming_off
+                $NS "Effects Back" "picom + gaps restored"
+            else
+                $NS "No gaming state" "Press it first (on)"
+            fi
+            ;;
+        toggle|*)
+            if [ -s "$STATE" ]; then
+                rm -f "$STATE"
+                x11_gaming_off
+                $NS "Effects Back" "picom + gaps restored"
+            else
+                : > "$STATE"
+                x11_gaming_on
+                $NS "Gaming Mode ON" "picom off / gaps 0 / borders 0"
+            fi
+            ;;
+    esac
+    exit 0
+fi
+
 getv() {
     hy getoption "$1" 2>/dev/null | sed -n 's/.*int: \([0-9]*\).*/\1/p'
 }

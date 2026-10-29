@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+# Widget Clockday — big day-name clock inspired by the reference rice:
+# a white time pill on top, a huge weekday (FRI) that slides when the day
+# changes, and the full date under it. All changes animate smoothly via
+# Gtk.Stack transitions (frame-clock paced).
+import os
+import sys
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+import i18n
+from widget_lib import mkwin, one_instance, make_flip, flip_set
+
+pidf = one_instance("clockday")
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+
+win, box = mkwin("clockday", """
+#cdtime { font-size: 26px; font-weight: bold; color: #f1f1f3; }
+#cdday { font-size: 60px; font-weight: 800; color: rgba(245,245,247,0.90); }
+#cddate { font-size: 12px; color: rgba(241,241,243,0.62); }
+""")
+
+# all-dark: the mkwin glass already provides the dark background + accent
+# border; the old white pill was rejected — keep every text light on glass
+tstack = make_flip(box, "cdtime", "", ttype="slide-up", dur=320)
+dstack = make_flip(box, "cdday", "", ttype="slide-left", dur=420)
+fstack = make_flip(box, "cddate", "", ttype="fade", dur=480)
+
+
+def tick():
+    now = i18n.render(i18n._conf_val("CLOCK") or "%H:%M")
+    flip_set(tstack, now)
+    # %a = abbreviated weekday (FRI / Fri); the big hero text
+    flip_set(dstack, i18n.render("%a").upper())
+    flip_set(fstack, i18n.render("%B %d %Y").upper())
+    return True
+
+
+def on_destroy(*a):
+    try:
+        os.unlink(pidf)
+    except OSError:
+        pass
+    Gtk.main_quit()
+
+
+tick()
+GLib.timeout_add(1000, tick)
+win.connect("destroy", on_destroy)
+win.show_all()
+Gtk.main()

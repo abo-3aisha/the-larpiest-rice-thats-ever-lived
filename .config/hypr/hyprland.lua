@@ -45,6 +45,29 @@ do
 end
 
 
+-- Workspace transition preset, written by ~/.local/bin/animations-menu
+-- (SUPER+S > Animations). speed = duration in deciseconds (1.8 = 180ms,
+-- higher = slower). gaps = gap between workspaces in px (0 = they touch).
+local RICE_WS = { name = "Classic Slide", style = "slide",
+    bezier = "easeOutQuint", speed = 1.8, speed_in = 1.6, gaps = 0 }
+do
+    local fh = io.open(HOME .. "/.config/rice/ws-anim.conf", "r")
+    if fh then
+        local t = {}
+        for line in fh:lines() do
+            local k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
+            if k then t[k] = v:gsub('"', "") end
+        end
+        fh:close()
+        if t.STYLE and t.STYLE ~= "" then RICE_WS.style = t.STYLE end
+        if t.BEZIER and t.BEZIER ~= "" then RICE_WS.bezier = t.BEZIER end
+        RICE_WS.speed = tonumber(t.SPEED) or RICE_WS.speed
+        RICE_WS.speed_in = tonumber(t.SPEED_IN) or RICE_WS.speed_in
+        RICE_WS.gaps = tonumber(t.GAPS) or RICE_WS.gaps
+    end
+end
+
+
 if rice_i18n.LANG and rice_i18n.LANG ~= "" then
     hl.env("LANG", rice_i18n.LANG)
       local lang_only = rice_i18n.LANG:match("^([%a_]+)")
@@ -93,6 +116,7 @@ hl.monitor({
 
 hl.on("hyprland.start", function()
     hl.exec_cmd("dbus-update-activation-environment --systemd --all")
+    hl.exec_cmd("dbus-update-activation-environment QT_QPA_PLATFORMTHEME=qt6ct")
     hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
 
     -- Wallpaper (swaybg preferred, hyprpaper fallback)
@@ -153,6 +177,7 @@ hl.config({
     general = {
         gaps_in     = 6,
         gaps_out    = 18,
+        gaps_workspaces = RICE_WS.gaps,
         border_size = 0,
         layout      = "dwindle",
         resize_on_border = true,
@@ -211,6 +236,11 @@ hl.curve("almostLinear",   { type = "bezier", points = { {0.5, 0.5},   {0.75, 1}
 hl.curve("quick",          { type = "bezier", points = { {0.15, 0},    {0.1, 1}     } })
 hl.curve("easy",           { type = "spring", mass = 0.85, stiffness = 220, dampening = 24 })
 hl.curve("buttery",        { type = "spring", mass = 0.75, stiffness = 320, dampening = 30 })
+-- superSmooth: fast attack, long gentle settle — the "Super Smooth" presets.
+hl.curve("superSmooth",    { type = "bezier", points = { {0.16, 1},    {0.24, 1}    } })
+-- abala.standard / abala.emphasized: from LarperX2000's "Abala Shell" rice.
+hl.curve("abala.standard",   { type = "bezier", points = { {0.2, 0.0},  {0.0, 1.0}   } })
+hl.curve("abala.emphasized", { type = "bezier", points = { {0.05, 0.7}, {0.1, 1.0}   } })
 
 hl.animation({ leaf = "global",        enabled = true,  speed = 8,    bezier = "default" })
 hl.animation({ leaf = "border",        enabled = true,  speed = 5,    bezier = "easeOutQuint" })
@@ -225,9 +255,11 @@ hl.animation({ leaf = "layersIn",      enabled = true,  speed = 4,    bezier = "
 hl.animation({ leaf = "layersOut",     enabled = true,  speed = 1.5,  bezier = "linear",      style = "fade" })
 hl.animation({ leaf = "fadeLayersIn",  enabled = true,  speed = 2,    bezier = "almostLinear" })
 hl.animation({ leaf = "fadeLayersOut", enabled = true,  speed = 1.5,  bezier = "almostLinear" })
-hl.animation({ leaf = "workspaces",    enabled = true,  speed = 1.8,  bezier = "easeOutQuint", style = "slide" })
-hl.animation({ leaf = "workspacesIn",  enabled = true,  speed = 1.6,  bezier = "easeOutQuint", style = "slide" })
-hl.animation({ leaf = "workspacesOut", enabled = true,  speed = 1.8,  bezier = "easeOutQuint", style = "slide" })
+-- Workspace transition preset (parsed near the top of this file as RICE_WS;
+-- also drives general.gaps_workspaces). Written by ~/.local/bin/animations-menu.
+hl.animation({ leaf = "workspaces",    enabled = true, speed = RICE_WS.speed,    bezier = RICE_WS.bezier, style = RICE_WS.style })
+hl.animation({ leaf = "workspacesIn",  enabled = true, speed = RICE_WS.speed_in, bezier = RICE_WS.bezier, style = RICE_WS.style })
+hl.animation({ leaf = "workspacesOut", enabled = true, speed = RICE_WS.speed,    bezier = RICE_WS.bezier, style = RICE_WS.style })
 -- Super+K drawer: smooth slide+fade for open/close.
 -- NOTE: `popin` (zoom) is NOT a valid style for this leaf on this Hyprland
 -- ("unknown style"); the only known-good style here is slidefade/slidefadevert.
@@ -351,7 +383,7 @@ hl.bind("CTRL + PRINT",          hl.dsp.exec_cmd(shot .. " output"))
 hl.bind(mainMod .. " + SPACE",  hl.dsp.exec_cmd("wofi --show drun"))
 hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd("sh -c 'for c in kitty contour ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
 hl.bind(mainMod .. " + SHIFT + T", hl.dsp.exec_cmd("sh -c 'for c in contour kitty ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))
-hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("dolphin"))
+hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("env QT_QPA_PLATFORMTHEME=qt6ct dolphin"))
 hl.bind(mainMod .. " + B",          hl.dsp.exec_cmd("cycle-power"))
 hl.bind(mainMod .. " + SHIFT + B", hl.dsp.exec_cmd("firefox"))
 hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd("sh -c 'for c in kitty contour ghostty wezterm foot alacritty; do command -v $c >/dev/null 2>&1 && exec $c; done'"))

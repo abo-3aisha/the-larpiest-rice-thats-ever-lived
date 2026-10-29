@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # Widget Manager — drag-and-drop placement of desktop widgets.
-# Opens from the SUPER+S control center; writes widgets.json + applies live.
+# Opens from the SUPER+S control center; Apply updates the live session
+# WITHOUT closing the manager, Save & Close applies and exits.
+# Precision: drag keeps the grab offset (the box never jumps to the cursor),
+# and a selected box can be nudged with the arrow keys (Shift = fine step).
 import json
 import os
 import subprocess
@@ -17,12 +20,15 @@ from gi.repository import Gdk, GLib, Gtk
 import widget_lib
 
 CFG = widget_lib.CFG
-KEYS = ["clockana", "clock", "music", "sys", "miku", "prayer", "hijri", "pet"]
-NAMES = {"clockana": "Analog Clock", "clock": "Clock", "music": "Now Playing",
+KEYS = ["clockana", "clock", "clockday", "frame", "dino", "music", "sys",
+        "miku", "prayer", "hijri", "pet"]
+NAMES = {"clockana": "Analog Clock", "clock": "Clock", "clockday": "Big Day Clock",
+         "frame": "Photo Frame", "dino": "Dino Game", "music": "Now Playing",
          "sys": "System", "miku": "Miku Kaomoji", "prayer": "Prayer",
          "hijri": "Hijri Date", "pet": "Miku Pet"}
 
-PAD = 8
+STEP = 0.004        # arrow-key nudge (~6px on a 1600px screen)
+FINE = 0.001        # Shift+arrow (~1.6px)
 
 
 def _T(key):
@@ -39,9 +45,12 @@ class Manager(Gtk.Window):
     def __init__(self):
         self.T = _T
         super().__init__(title="Widget Manager")
-        self.set_default_size(780, 520)
+        self.set_default_size(820, 560)
+        self.set_can_focus(True)
         self.data = widget_lib.load()
         self.active = None
+        self.dragging = False    # True only while the mouse button is held
+        self.grab = (0.0, 0.0)     # grab offset inside the box (fractions)
         self.spins = {}
         self.checks = {}
 
@@ -53,8 +62,8 @@ class Manager(Gtk.Window):
         self.add(root)
 
         title = Gtk.Label(label=("Desktop Widgets — drag the boxes to place them. "
-                                 "All widgets live UNDER your apps, on every workspace; "
-                                 "only Miku Pet is a normal window (has a workspace)."))
+                                 "Select a box and use the arrow keys for precise "
+                                 "moves (Shift = 1px steps). Apply updates live."))
         title.set_line_wrap(True)
         title.set_halign(Gtk.Align.START)
         root.pack_start(title, False, False, 0)
@@ -64,7 +73,7 @@ class Manager(Gtk.Window):
 
         # --- left: enable + workspace per widget ---
         lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        lst.set_size_request(270, -1)
+        lst.set_size_request(250, -1)
         mid.pack_start(lst, False, False, 0)
         for k in KEYS:
             row = Gtk.Box(spacing=8)
@@ -90,12 +99,18 @@ class Manager(Gtk.Window):
 
         hint = Gtk.Label(label=self.T("WM_HINT"))
         hint.set_halign(Gtk.Align.START)
+        hint.set_line_wrap(True)
         hint.get_style_context().add_class("dim")
         lst.pack_start(hint, False, False, 0)
 
+        self.poslbl = Gtk.Label(label="")
+        self.poslbl.set_halign(Gtk.Align.START)
+        self.poslbl.get_style_context().add_class("dim")
+        lst.pack_start(self.poslbl, False, False, 0)
+
         # --- right: preview ---
         self.da = Gtk.DrawingArea()
-        self.da.set_size_request(430, 250)
+        self.da.set_size_request(460, 270)
         self.da.set_events(Gdk.EventMask.BUTTON_PRESS_MASK |
                            Gdk.EventMask.BUTTON_RELEASE_MASK |
                            Gdk.EventMask.POINTER_MOTION_MASK)
@@ -105,20 +120,26 @@ class Manager(Gtk.Window):
         self.da.connect("motion-notify-event", self.on_motion)
         mid.pack_start(self.da, True, True, 0)
 
-        # --- bottom ---
+        # --- bottom: Apply (live, stays open) / Save & Close / Close ---
         btns = Gtk.Box(spacing=8)
-        applyb = Gtk.Button(label=self.T("WM_SAVE"))
-        applyb.connect("clicked", self.on_apply)
+        applyb = Gtk.Button(label=self.T("WM_APPLY"))
+        applyb.connect("clicked", lambda *a: self.on_apply(close=False))
+        saveb = Gtk.Button(label=self.T("WM_SAVECLOSE"))
+        saveb.connect("clicked", lambda *a: self.on_apply(close=True))
         closeb = Gtk.Button(label=self.T("WM_CLOSE"))
         closeb.connect("clicked", lambda *a: self.destroy())
         btns.pack_start(applyb, False, False, 0)
+        btns.pack_start(saveb, False, False, 0)
         btns.pack_start(closeb, False, False, 0)
+        self.status = Gtk.Label(label="")
+        self.status.get_style_context().add_class("dim")
+        btns.pack_start(self.status, False, False, 8)
         root.pack_start(btns, False, False, 0)
 
         self.add_css()
+        self.connect("key-press-event", self.on_key)
 
     def add_css(self):
-        a = widget_lib.accent()
         p = Gtk.CssProvider()
         p.load_from_data(b"""
 window { background: rgba(16,16,20,0.96); }
@@ -155,6 +176,14 @@ window { background: rgba(16,16,20,0.96); }
         ctx.set_line_width(1)
         ctx.rectangle(ox, oy, w, h)
         ctx.stroke()
+        # faint 10% grid for precise placement
+        ctx.set_source_rgba(1, 1, 1, 0.05)
+        for i in range(1, 10):
+            ctx.move_to(ox + w * i / 10.0, oy)
+            ctx.line_to(ox + w * i / 10.0, oy + h)
+            ctx.move_to(ox, oy + h * i / 10.0)
+            ctx.line_to(ox + w, oy + h * i / 10.0)
+        ctx.stroke()
         for k in KEYS:
             e = self.data.get(k, {})
             if not e.get("enabled"):
@@ -166,11 +195,12 @@ window { background: rgba(16,16,20,0.96); }
                 c = tuple(int(a[i:i + 2], 16) / 255 for i in (0, 2, 4))
                 ctx.set_source_rgba(c[0], c[1], c[2], 0.9)
             r = 5
+            import math
             ctx.new_path()
-            ctx.arc(x + r, y + r, r, 180 / 180 * 3.1415926, 270 / 180 * 3.1415926)
-            ctx.arc(x + bw - r, y + r, r, 270 / 180 * 3.1415926, 0)
-            ctx.arc(x + bw - r, y + bh - r, r, 0, 90 / 180 * 3.1415926)
-            ctx.arc(x + r, y + bh - r, r, 90 / 180 * 3.1415926, 180 / 180 * 3.1415926)
+            ctx.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+            ctx.arc(x + bw - r, y + r, r, 1.5 * math.pi, 2 * math.pi)
+            ctx.arc(x + bw - r, y + bh - r, r, 0, 0.5 * math.pi)
+            ctx.arc(x + r, y + bh - r, r, 0.5 * math.pi, math.pi)
             ctx.close_path()
             ctx.fill()
             ctx.set_source_rgba(0, 0, 0, 0.45)
@@ -181,7 +211,10 @@ window { background: rgba(16,16,20,0.96); }
 
     def pick(self, px, py):
         ox, oy, w, h = self.preview_geom()
-        for k in KEYS:
+        # iterate REVERSED: boxes are drawn in KEYS order, so the LAST drawn
+        # is visually on top — clicking must select that one, not the one
+        # buried underneath (overlapping boxes used to move the wrong widget)
+        for k in reversed(KEYS):
             e = self.data.get(k, {})
             if not e.get("enabled"):
                 continue
@@ -190,31 +223,80 @@ window { background: rgba(16,16,20,0.96); }
                 return k
         return None
 
+    def update_poslbl(self):
+        if not self.active:
+            self.poslbl.set_text("")
+            return
+        e = self.data.get(self.active, {})
+        self.poslbl.set_text("%s — x %.1f%%  y %.1f%%" % (
+            NAMES[self.active], e.get("x", 0) * 100, e.get("y", 0) * 100))
+
     def on_press(self, da, ev):
         k = self.pick(ev.x, ev.y)
         if k:
             self.active = k
-            da.queue_draw()
+            self.dragging = True
+            # grab offset INSIDE the box so dragging never teleports it
+            ox, oy, w, h = self.preview_geom()
+            e = self.data[k]
+            bx = ox + e.get("x", 0.5) * w
+            by = oy + e.get("y", 0.5) * h
+            self.grab = ((ev.x - bx) / max(1.0, w), (ev.y - by) / max(1.0, h))
+        else:
+            self.active = None     # click on empty space = deselect
+            self.dragging = False
+        self.update_poslbl()
+        da.queue_draw()
         return True
 
     def on_release(self, da, ev):
-        self.active = None
-        da.queue_draw()
+        # stop dragging but keep the selection so arrow keys still work
+        self.dragging = False
         return True
 
     def on_motion(self, da, ev):
-        if not self.active:
+        if not self.active or not self.dragging:
             return True
         ox, oy, w, h = self.preview_geom()
         e = self.data.setdefault(self.active, {})
-        ex = max(0.0, min(1.0, (ev.x - ox) / w))
-        ey = max(0.0, min(1.0, (ev.y - oy) / h))
-        e["x"] = round(ex, 3)
-        e["y"] = round(ey, 3)
+        ex = max(0.0, min(1.0, (ev.x - ox) / w - self.grab[0]))
+        ey = max(0.0, min(1.0, (ev.y - oy) / h - self.grab[1]))
+        e["x"] = round(ex, 4)
+        e["y"] = round(ey, 4)
+        self.update_poslbl()
         da.queue_draw()
         return True
 
-    def on_apply(self, *a):
+    def on_key(self, win, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.active = None
+            self.update_poslbl()
+            self.da.queue_draw()
+            return True
+        # arrow nudging: works on the current selection (click a box first)
+        if not self.active:
+            return False
+        step = FINE if ev.state & Gdk.ModifierType.SHIFT_MASK else STEP
+        e = self.data.setdefault(self.active, {})
+        moved = False
+        if ev.keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
+            e["x"] = round(max(0.0, e.get("x", 0.5) - step), 4)
+            moved = True
+        elif ev.keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right):
+            e["x"] = round(min(1.0, e.get("x", 0.5) + step), 4)
+            moved = True
+        elif ev.keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
+            e["y"] = round(max(0.0, e.get("y", 0.5) - step), 4)
+            moved = True
+        elif ev.keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
+            e["y"] = round(min(1.0, e.get("y", 0.5) + step), 4)
+            moved = True
+        if moved:
+            self.update_poslbl()
+            self.da.queue_draw()
+        return moved
+
+    def on_apply(self, close=False):
         for k in KEYS:
             e = self.data.setdefault(k, {})
             e["enabled"] = bool(self.checks[k].get_active())
@@ -226,9 +308,14 @@ window { background: rgba(16,16,20,0.96); }
             with open(CFG, "w") as f:
                 json.dump({"v": 1, "widgets": self.data}, f, indent=2)
         except OSError as ex:
-            print("save failed:", ex)
+            self.status.set_text("save failed: %s" % ex)
             return
         subprocess.Popen([os.path.expanduser("~/.local/bin/widgets-apply")])
+        if close:
+            self.destroy()
+        else:
+            self.status.set_text(self.T("WM_APPLIED"))
+            GLib.timeout_add(2500, lambda: (self.status.set_text(""), False)[1])
 
 
 def main():

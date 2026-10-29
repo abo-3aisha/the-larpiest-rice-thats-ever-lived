@@ -25,12 +25,32 @@ fi
 cap=$((bestcap > 100 ? 100 : bestcap))
 status=$(cat "$best/status" 2>/dev/null)
 
-cls=("battery" "b$cap")
-[ "$cap" -le 20 ] && cls+=("critical")
-case "$status" in
-    Charging | Full) cls+=("charging") ;;
-esac
+ac=0
+for p in /sys/class/power_supply/*/online; do
+    [ -f "$p" ] || continue
+    [ "$(cat "$p" 2>/dev/null)" = "1" ] && ac=1
+done
 
-printf '{"text":"%d%%","class":[%s],"alt":"%d%% %s"}\n' "$cap" \
+cap_disp=$cap
+if [ "$ac" = "1" ]; then
+    case "$status" in
+        Charging | Full) ;;
+        *)
+            # Plugged in but the EC is in its "top-off pause" (it toggles
+            # 100↔~97 with no steps in between, reporting Discharging for a
+            # moment). Never read that as unplugged: keep the charging look
+            # and show a steady full instead of a flickering 97.
+            [ "$cap" -ge 97 ] && cap_disp=100
+            ;;
+    esac
+fi
+
+cls=("battery" "b$cap_disp")
+[ "$cap" -le 20 ] && cls+=("critical")
+if [ "$ac" = "1" ] || [ "$status" = "Charging" ] || [ "$status" = "Full" ]; then
+    cls+=("charging")
+fi
+
+printf '{"text":"%d%%","class":[%s],"alt":"%d%% %s"}\n' "$cap_disp" \
     "$(printf '"%s",' "${cls[@]}" | sed 's/,$//')" \
-    "$cap" "$status"
+    "$cap_disp" "$status"

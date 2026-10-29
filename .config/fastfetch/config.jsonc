@@ -3,15 +3,15 @@
         "type": "builtin",
         "source": "arch",
         "color": {
-            "1": "#d28665",
-            "2": "#f2eedc",
-            "3": "#d28665"
+            "1": "#dfdfdf",
+            "2": "#dfdfdf",
+            "3": "#dfdfdf"
         }
     },
     "display": {
         "separator": "  ",
         "color": {
-            "keys": "#d28665"
+            "keys": "#dfdfdf"
         }
     },
     "modules": [

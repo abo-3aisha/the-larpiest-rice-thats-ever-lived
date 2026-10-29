@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# bluetooth-menu — Bluetooth manager for the Control Center (SUPER+S).
+# Power on/off, visibility (discoverable + pairable), a WORKING scan for new
+# devices, and connect/disconnect (+ auto-pair) known devices. wofi-first,
+# English-only. Every action re-runs the menu so the state is always fresh.
+#
+# BUG FIXED 2026-10-16: the old scan was `timeout 8 bluetoothctl scan on`, but
+# bluetoothctl reads commands from stdin and exits on EOF, so the scan stopped
+# instantly and headphones were never discovered. The scan now feeds commands
+# through a pipe that stays open for the whole discovery window and the
+# discovered devices are parsed from the scan stream into a cache.
+set -u
+
+CACHE="$HOME/.cache/bt-menu-seen"
+
+if ! command -v bluetoothctl >/dev/null 2>&1; then
+    notify-send -u low -t 2600 "Bluetooth" "bluetoothctl is not installed" 2>/dev/null
+    exit 1
+fi
+
+MENU=""
+for m in wofi rofi fuzzel; do
+    command -v "$m" >/dev/null 2>&1 && MENU="$m" && break
+done
+[ -z "$MENU" ] && exit 1
+
+notify() { notify-send -t 2500 -u low "Bluetooth" "$1" 2>/dev/null; }
+
+LOG="$HOME/.cache/bluetooth-menu.log"
+blog() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG" 2>/dev/null; }
+is_conn() { bluetoothctl info "$1" 2>/dev/null | grep -qi 'Connected: yes'; }
+
+pick() { # $1=prompt $2=lines ; items on stdin
+    case "$MENU" in
+        wofi)   wofi  --dmenu --prompt "$1" --height "$((76 + 34 * $2))" ;;
+        rofi)   rofi  -dmenu -p "$1" -lines "$2" ;;
+        fuzzel) fuzzel --dmenu --prompt "$1" --lines "$2" ;;
+    esac
+}
+
+show=$(bluetoothctl show 2>/dev/null)
+powered=no
+discoverable=no
+printf '%s\n' "$show" | grep -qi 'Powered: yes'      && powered=yes
+printf '%s\n' "$show" | grep -qi 'Discoverable: yes' && discoverable=yes
+
+if [ "$powered" = yes ]; then
+    PWR="󰂯  Bluetooth: ON  (turn off)"
+    if [ "$discoverable" = yes ]; then
+        VIS="󰂰  Visible: ON  (turn off)"
+    else
+        VIS="󰂰  Visible: OFF  (make visible)"
+    fi
+    SCAN="󰂰  Scan for devices  ↻"
+else
+    PWR="󰂲  Bluetooth: OFF  (turn on)"
+    VIS="󰂰  Visible: OFF  (bluetooth is off)"
+    SCAN="󰂰  Scan for devices  (bluetooth is off)"
+fi
+
+dev_lines=()
+dev_macs=()
+declare -A seen=()
+add_dev() {
+    local mac="$1" name="$2" info icon tag
+    [ -z "$mac" ] && return
+    [ -n "${seen[$mac]:-}" ] && return
+    seen[$mac]=1
+    [ -z "$name" ] && name="$mac"
+    info="$(bluetoothctl info "$mac" 2>/dev/null)"
+    icon="󰂯"
+    printf '%s\n' "$info" | grep -qi 'Connected: yes' && icon="󰂱"
+    tag=""
+    printf '%s\n' "$info" | grep -qi 'Paired: yes' || tag="  [new]"
+    dev_lines+=("$icon  $name$tag")
+    dev_macs+=("$mac")
+}
+
+# 1. devices already known to bluetoothd (paired/bonded + seen this session)
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    add_dev "${line%% *}" "${line#* }"
+done < <(bluetoothctl devices 2>/dev/null | sed -n 's/^Device //p')
+
+# 2. devices our last scan discovered (survives even if bluetoothd drops them)
+if [ -f "$CACHE" ]; then
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        add_dev "${line%% *}" "${line#* }"
+    done < "$CACHE"
+fi
+
+items="$PWR"$'\n'"$VIS"$'\n'"$SCAN"
+for l in "${dev_lines[@]}"; do items="$items"$'\n'"$l"; done
+
+sel="$(printf '%s\n' "$items" | pick "󰂯" 20)"
+[ -z "$sel" ] && exit 0
+
+if [ "$sel" = "$PWR" ]; then
+    if [ "$powered" = yes ]; then
+        bluetoothctl power off >/dev/null 2>&1
+        : > "$CACHE"
+        notify "Bluetooth: OFF"
+    else
+        bluetoothctl power on >/dev/null 2>&1
+        sleep 1
+        bluetoothctl agent on >/dev/null 2>&1
+        bluetoothctl default-agent >/dev/null 2>&1
+        notify "Bluetooth: ON"
+    fi
+    exec "$0"
+fi
+
+if [ "$sel" = "$VIS" ]; then
+    if [ "$powered" = yes ]; then
+        if [ "$discoverable" = yes ]; then
+            bluetoothctl discoverable off >/dev/null 2>&1
+            bluetoothctl pairable off   >/dev/null 2>&1
+            notify "No longer visible"
+        else
+            bluetoothctl discoverable on >/dev/null 2>&1
+            bluetoothctl pairable on     >/dev/null 2>&1
+            notify "Visible for pairing"
+        fi
+    else
+        notify "Turn Bluetooth on first"
+    fi
+    exec "$0"
+fi
+
+if [ "$sel" = "$SCAN" ]; then
+    if [ "$powered" != yes ]; then
+        notify "Turn Bluetooth on first"
+        exit 0
+    fi
+    notify "Scanning 15s — put your device in pairing mode"
+    # Keep bluetoothctl alive for the WHOLE window (stdin EOF would stop it).
+    scan_out=$( { printf 'scan on\n'; sleep 15; printf 'scan off\nquit\n'; } | bluetoothctl 2>/dev/null )
+    : > "$CACHE"
+    printf '%s\n' "$scan_out" \
+        | sed -n -e 's/.*\[NEW\] Device \([0-9A-Fa-f:]\{17\}\) \(.*\)/\1 \2/p' \
+                 -e 's/.*\[CHG\] Device \([0-9A-Fa-f:]\{17\}\) Name: \(.*\)/\1 \2/p' \
+                 -e 's/.*\[CHG\] Device \([0-9A-Fa-f:]\{17\}\) Alias: \(.*\)/\1 \2/p' \
+        | awk 'NF>1 { n[$1]=substr($0, index($0," ")+1) } END { for (m in n) print m" "n[m] }' \
+        >> "$CACHE"
+    exec "$0"
+fi
+
+# A device row was selected: dispatch by index.
+idx=-1
+for i in "${!dev_lines[@]}"; do
+    [ "${dev_lines[$i]}" = "$sel" ] && idx=$i && break
+done
+[ "$idx" -lt 0 ] && exit 0
+mac="${dev_macs[$idx]}"
+
+if is_conn "$mac"; then
+    bluetoothctl disconnect "$mac" >/dev/null 2>&1
+    blog "disconnect $mac"
+    notify "Disconnected"
+else
+    blog "=== connect $mac ==="
+    if ! bluetoothctl info "$mac" 2>/dev/null | grep -qi 'Paired: yes'; then
+        blog "not paired -> pair"
+        { printf 'agent on\ndefault-agent\npair %s\ntrust %s\n' "$mac" "$mac"; sleep 5; printf 'quit\n'; } | bluetoothctl >>"$LOG" 2>&1
+    fi
+    # Connect with the agent alive for the whole window so the AUDIO profile can
+    # come up; then poll because "Connected: yes" right after connect is not
+    # proof it stayed (some devices drop immediately).
+    { printf 'agent on\ndefault-agent\nconnect %s\n' "$mac"; sleep 8; printf 'info %s\nquit\n' "$mac"; } | bluetoothctl >>"$LOG" 2>&1
+    ok=no
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        is_conn "$mac" && { ok=yes; break; }
+        sleep 1
+    done
+    if [ "$ok" = no ]; then
+        blog "still not connected -> retry"
+        { printf 'connect %s\n' "$mac"; sleep 6; printf 'quit\n'; } | bluetoothctl >>"$LOG" 2>&1
+        for _ in 1 2 3 4 5 6; do
+            is_conn "$mac" && { ok=yes; break; }
+            sleep 1
+        done
+    fi
+    if [ "$ok" = yes ]; then
+        blog "connected OK"
+        if command -v pactl >/dev/null 2>&1 \
+           && ! pactl list cards short 2>/dev/null | grep -qi "bluez_card.$(printf '%s' "$mac" | tr ':' '_')"; then
+            blog "note: no bluez audio card visible yet (profile may still be negotiating)"
+        fi
+        notify "Connected"
+    else
+        blog "FAILED to connect"
+        notify "Could not connect — pairing mode? is it still paired to your phone?"
+    fi
+fi
+exec "$0"

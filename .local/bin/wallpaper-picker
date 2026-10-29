@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import hashlib
+import json
 import os
+import queue
 import re
 import subprocess
 import sys
 import threading
+import time
 import warnings
 from collections import OrderedDict
 
@@ -18,12 +21,15 @@ try:
     gi.require_version("Gdk", "3.0")
     gi.require_version("GdkPixbuf", "2.0")
     from gi.repository import Gdk, GLib, GdkPixbuf, Gtk
+    import cairo
 except Exception:
     HAS_GTK = False
 
 THUMB = os.path.expanduser("~/.cache/wallpaper-picker/thumbs")
 CONF = os.path.expanduser("~/.config/hypr/hyprpaper.conf")
 APPLY = os.path.expanduser("~/.local/bin/apply-wallpaper")
+THEME = os.path.expanduser("~/.config/hypr/theme.lua")
+STATE = os.path.expanduser("~/.cache/wallpaper-picker/last")
 DIR = os.path.expanduser("~/Pictures/Wallpapers")
 EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff",
        ".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v")
@@ -45,21 +51,11 @@ def list_files():
     return files
 
 
-def current_wallpaper_index(files):
-    """Index of the wallpaper currently set in hyprpaper.conf so the picker
-    opens focused on it. Video wallpapers point at the converted cache copy
-    (~/.cache/video-wallpaper/conv/<name>-1080p60.<ext>), so match that too."""
-    path = ""
-    try:
-        for line in open(CONF):
-            line = line.strip()
-            if line.startswith("wallpaper") and "," in line:
-                path = line.split(",", 1)[1].strip()
-                break
-    except OSError:
-        return 0
+def find_index(files, path):
+    """Best-effort index of `path` inside `files`. Handles the converted
+    video cache copy (~/.cache/video-wallpaper/conv/<name>-1080p60.<ext>)."""
     if not path or not files:
-        return 0
+        return -1
     ap = os.path.abspath(path)
     for i, f in enumerate(files):
         if os.path.abspath(f) == ap:
@@ -69,7 +65,59 @@ def current_wallpaper_index(files):
         stem, ext = os.path.splitext(os.path.basename(f))
         if bn == stem + "-1080p60" + ext:
             return i
+    return -1
+
+
+def current_wallpaper_index(files):
+    """Index to open focused on the wallpaper that is ACTIVELY set right
+    now (hyprpaper.conf is written by every path: picker, rand-wallpaper,
+    video-wallpaper). The STATE file is only a fallback — preferring it
+    made the picker open on a stale manual pick after SUPER+SHIFT+W."""
+    path = ""
+    try:
+        for line in open(CONF):
+            line = line.strip()
+            if line.startswith("wallpaper") and "," in line:
+                path = line.split(",", 1)[1].strip()
+                break
+    except OSError:
+        pass
+    i = find_index(files, path)
+    if i >= 0:
+        return i
+    try:
+        saved = open(STATE).read().strip()
+        i = find_index(files, saved)
+        if i >= 0:
+            return i
+    except OSError:
+        pass
     return 0
+
+
+def save_state(path):
+    try:
+        os.makedirs(os.path.dirname(STATE), exist_ok=True)
+        with open(STATE, "w") as f:
+            f.write(os.path.abspath(path))
+    except OSError:
+        pass
+
+
+def theme_accent():
+    """Accent color from the single color engine (theme.lua), so the selected
+    card border re-tints with every wallpaper. Fallback = reference cyan."""
+    try:
+        txt = open(THEME).read()
+        m = re.search(r'accent\s*=\s*"#?([0-9a-fA-F]{6})"', txt)
+        if m:
+            h = m.group(1)
+            return (int(h[0:2], 16) / 255.0,
+                    int(h[2:4], 16) / 255.0,
+                    int(h[4:6], 16) / 255.0)
+    except OSError:
+        pass
+    return (114.0 / 255.0, 180.0 / 255.0, 234.0 / 255.0)
 
 
 def thumb(path):
@@ -100,9 +148,26 @@ def thumb(path):
         return None
 
 
-PB_MAX = 1200
+# 900 covers the center card (~343px @1080p, ~686 on 4k) at 2x; 1400 made the
+# draw thread software-scale ~4x the needed pixels every animation frame.
+PB_MAX = 900
 PB_CAP = 16
-XOFF = -300  # the carousel sits left of center; size is untouched
+MAX_SIDE = 4          # visible cards per side (like the reference: 4+1+4)
+TILT = -0.13          # side cards lean counter-clockwise ~7.5 deg, both sides
+CENTER_W, CENTER_H = 343.0, 446.0   # selected card box @1080p
+SIDE_W, SIDE_H = 103.0, 305.0       # side card box @1080p
+FIRST_OFF = 234.0    # center -> first side card offset @1080p
+STEP = 113.0         # pitch between side cards @1080p
+ANIM_DUR = 0.40      # seconds per step, time-based ease-out (see _on_tick)
+
+# --- mouse handling (keyboard stays the primary input) ----------------------
+ARM_PX = 8.0         # pointer must travel this far before mouse input counts,
+                     # so an idle/resting cursor can never steal the picker
+EDGE_FRAC = 0.26     # outer 26% of the width on each side = auto-browse zone
+EDGE_MS = 320        # repeat interval while the pointer rests in a zone
+EDGE_DRAG = False    # False: wheel-style, the strip moves AGAINST the pointer
+                     # (right edge -> next). True: the strip follows the pointer.
+                     # User picked this on 2026-10-27 ("بتتحركو عكس حركة الماوس").
 
 
 class Coverflow:
@@ -114,14 +179,29 @@ class Coverflow:
         # first item lands on the last one and vice versa.
         self.pos = float(start)
         self.target = float(start)
-        self.ticking = False
+        self._anim_from = float(start)
+        self._anim_t0 = 0.0
+        self._tick_id = None
+        self._bg_key = None
+        self._bg_surf = None
         self._pbs = OrderedDict()
         self._pb_lock = threading.Lock()
+        # Decodes (incl. thumb re-gen via PIL/ffmpeg) never run on the draw
+        # thread: one background loader drains this queue and caches results.
+        self._load_q = queue.Queue()
+        self._pending = set()
+        threading.Thread(target=self._loader, daemon=True).start()
+        self.accent = theme_accent()
+
+        self._armed = False      # pointer moved ≥8px since open → mouse input
+        self._m0 = None          # first motion position (arm baseline)
+        self._edge_dir = 0       # -1/+1 while pointer rests in an edge zone
+        self._edge_id = None     # GLib repeating timer for edge auto-browse
 
         self.win = Gtk.Window()
         self.win.set_title("Wallpaper Picker")
         self.win.set_decorated(False)
-        self.win.connect("destroy", Gtk.main_quit)
+        self.win.connect("destroy", self._on_destroy)
         self.win.connect("key-press-event", self.on_keypress)
 
         scr = self.win.get_screen()
@@ -135,17 +215,13 @@ class Coverflow:
         self.win.set_default_size(geo.width, geo.height)
         self.win.move(geo.x, geo.y)
         self.win.set_keep_above(True)
+        self.win.set_accept_focus(True)
+        self.win.set_focus_on_map(True)
 
         css = Gtk.CssProvider()
         css.load_from_data(b"""
             window.wallpapers { background-color:transparent; }
             drawingarea.wallpapers { background-color:transparent; }
-            label.hint {
-                color:rgba(235,222,152,0.7);
-                font-family:Sans;
-                font-size:14px;
-                padding:10px;
-            }
         """)
         screen = self.win.get_screen()
         provider = Gtk.StyleContext()
@@ -154,70 +230,221 @@ class Coverflow:
         self.win.get_style_context().add_class("wallpapers")
 
         self.da = Gtk.DrawingArea()
+        self.da.set_can_focus(True)
         self.da.get_style_context().add_class("wallpapers")
+        self.da.add_events(Gdk.EventMask.POINTER_MOTION_MASK
+                           | Gdk.EventMask.LEAVE_NOTIFY_MASK
+                           | Gdk.EventMask.SCROLL_MASK
+                           | Gdk.EventMask.SMOOTH_SCROLL_MASK
+                           | Gdk.EventMask.BUTTON_PRESS_MASK)
         self.da.connect("draw", self.on_draw)
         self.da.connect("button-press-event", self.on_click)
         self.da.connect("scroll-event", self.on_scroll)
-
-        hint = Gtk.Label(label="arrows flip (∞ wrap)  ·  Enter apply  ·  Esc close")
-        hint.get_style_context().add_class("hint")
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.pack_start(self.da, True, True, 0)
-        box.pack_start(hint, False, False, 0)
-        self.win.add(box)
+        self.da.connect("motion-notify-event", self.on_motion)
+        self.da.connect("leave-notify-event", self.on_leave)
+        self.da.connect("key-press-event", self.on_keypress)
+        self.win.add(self.da)
+        # fullscreen() MUST come after show_all() or Wayland maps it as a small
+        # tiled window shoved to one side.
         self.win.show_all()
         self.win.fullscreen()
         self.win.present()
+        # keyboard-first: force focus now + a few retries, because Hyprland maps
+        # a fullscreen client without giving it the keyboard (the old bug: keys
+        # only worked after wiggling the mouse). See _ensure_focus().
+        self.da.grab_focus()
+        for delay in (60, 150, 350, 700, 1200):
+            GLib.timeout_add(delay, self._ensure_focus)
 
-        for k in range(-2, 3):
-            if self.n:
-                self.pb((start + k) % self.n)
+        # center card first so the frame you see immediately has it; sides
+        # stream in from the loader thread (window never blocks on decode).
+        if self.n:
+            self.pb(start % self.n)
+            for k in range(-(MAX_SIDE + 1), MAX_SIDE + 2):
+                if k:
+                    self.pb((start + k) % self.n)
 
     def pb(self, i):
+        """Cached (pixbuf, cairo-surface) for card i, or None while loading /
+        if unreadable. A miss queues a background decode instead of decoding
+        inline — a stale video thumb re-gen used to freeze the whole picker."""
         with self._pb_lock:
             if i in self._pbs:
                 self._pbs.move_to_end(i)
                 return self._pbs[i]
+            if i in self._pending:
+                return None
+            self._pending.add(i)
+        self._load_q.put(i)
+        return None
+
+    def _decode(self, i):
         t = os.path.join(THUMB,
                          hashlib.md5(os.path.abspath(self.files[i])
                                      .encode()).hexdigest()[:16] + ".jpg")
         if not os.path.isfile(t):
             t = thumb(self.files[i])
             if not t:
-                with self._pb_lock:
-                    self._pbs[i] = None
                 return None
-        try:
-            pb = GdkPixbuf.Pixbuf.new_from_file_at_size(t, PB_MAX, PB_MAX * 9 // 16)
-        except Exception:
+        pb = GdkPixbuf.Pixbuf.new_from_file_at_size(t, PB_MAX, PB_MAX)
+        # one cairo surface per pixbuf, reused every animation frame
+        return (pb, Gdk.cairo_surface_create_from_pixbuf(pb, 1, None))
+
+    def _loader(self):
+        while True:
+            i = self._load_q.get()
+            try:
+                entry = self._decode(i)
+            except Exception:
+                entry = None
             with self._pb_lock:
-                self._pbs[i] = None
-            return None
-        with self._pb_lock:
-            self._pbs[i] = pb
-            while len(self._pbs) > PB_CAP:
-                self._pbs.popitem(last=False)
-        return pb
+                self._pending.discard(i)
+                self._pbs[i] = entry          # cache failures too (no retry loop)
+                while len(self._pbs) > PB_CAP:
+                    self._pbs.popitem(last=False)
+            GLib.idle_add(self._redraw)
+
+    def _redraw(self):
+        try:
+            self.da.queue_draw()
+        except Exception:
+            pass
+        return False
+
+    def _on_destroy(self, *_a):
+        self._stop_edge()
+        Gtk.main_quit()
+
+    def _ensure_focus(self):
+        """Force keyboard focus onto the picker (see the call sites).
+
+        Hyprland does not reliably activate a window that maps fullscreen, and
+        on Wayland a client cannot focus itself — so ask the compositor. The old
+        symptom was exactly this: keys only worked after wiggling the mouse,
+        because follow_mouse happened to focus us."""
+        try:
+            if self.win.has_toplevel_focus():
+                return False       # already ours: never steal focus back later
+        except Exception:
+            pass
+        try:
+            self.da.grab_focus()
+            self.win.present()
+        except Exception:
+            pass
+        addr = self._win_address()
+        if addr:
+            try:
+                subprocess.Popen(
+                    ["hyprctl", "dispatch", "focuswindow", "address:" + addr],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        return False
+
+    def _win_address(self):
+        """Hyprland address of our own window, or None.
+
+        Focusing by address sidesteps the `title:` regex: our title contains a
+        space and the dispatcher's argument parser is free to mangle it."""
+        try:
+            out = subprocess.run(["hyprctl", "-j", "clients"],
+                                 capture_output=True, text=True,
+                                 timeout=3).stdout
+            for c in json.loads(out or "[]"):
+                if c.get("title") == "Wallpaper Picker":
+                    return c.get("address")
+        except Exception:
+            pass
+        return None
+
+    def _stop_edge(self):
+        if self._edge_id is not None:
+            GLib.source_remove(self._edge_id)
+            self._edge_id = None
+        self._edge_dir = 0
+
+    def _edge_tick(self):
+        if self._edge_dir and self.n >= 2:
+            self.move(self._edge_dir)
+            return True
+        self._edge_id = None
+        return False
+
+    def _edge(self, direction):
+        """Pointer parked in an edge zone: step once, then keep stepping."""
+        if self.n < 2:
+            self._stop_edge()
+            return
+        if EDGE_DRAG:
+            direction = -direction
+        if self._edge_dir == direction and self._edge_id is not None:
+            return                        # already repeating this way
+        self._stop_edge()
+        self._edge_dir = direction
+        self.move(direction)              # instant response, no EDGE_MS wait
+        self._edge_id = GLib.timeout_add(EDGE_MS, self._edge_tick)
+
+    def _arm_check(self, ev):
+        """Mouse goes live only once the pointer really travels ARM_PX."""
+        if self._m0 is None:
+            self._m0 = (ev.x_root, ev.y_root)
+            return
+        dx = ev.x_root - self._m0[0]
+        dy = ev.y_root - self._m0[1]
+        if dx * dx + dy * dy >= ARM_PX * ARM_PX:
+            self._armed = True
+            self._m0 = None
+
+    def on_motion(self, da, ev):
+        if not self._armed:
+            self._arm_check(ev)
+            if not self._armed:
+                return False
+        W = da.get_allocated_width() or 1
+        frac = ev.x / W
+        if frac >= 1.0 - EDGE_FRAC:
+            self._edge(+1)                # right zone (EDGE_DRAG flips it)
+        elif frac <= EDGE_FRAC:
+            self._edge(-1)                # left zone
+        else:
+            self._stop_edge()
+        return False
+
+    def on_leave(self, da, ev):
+        # pointer left the window: kill auto-browse and re-require a real move
+        self._stop_edge()
+        self._armed = False
+        self._m0 = None
+        return False
 
     def move(self, delta):
         if self.n < 2:
             return
         # no clamping: the strip is infinite, wrap_d folds it for drawing
         self.target += delta
-        if not self.ticking:
-            self.ticking = True
-            GLib.timeout_add(16, self.tick)
+        self._start_anim()
 
-    def tick(self):
-        diff = self.target - self.pos
-        if abs(diff) < 0.005:
-            self.pos = self.target
-            self.ticking = False
-            self.da.queue_draw()
+    def _start_anim(self):
+        # restart the ease from wherever we are now (key-spam = catch-up,
+        # release = one clean settle to the final target)
+        self._anim_from = self.pos
+        self._anim_t0 = time.monotonic()
+        if self._tick_id is None:
+            # GTK frame-clock tick: paced to the compositor's vsync instead
+            # of a 16ms wall timer (the main source of flip jitter)
+            self._tick_id = self.da.add_tick_callback(self._on_tick)
+
+    def _on_tick(self, widget, frame_clock):
+        p = (time.monotonic() - self._anim_t0) / ANIM_DUR
+        if p >= 1.0:
+            self.pos = float(self.target)
+            self._tick_id = None
+            widget.queue_draw()
             return False
-        self.pos += diff * 0.22
-        self.da.queue_draw()
+        e = 1.0 - (1.0 - p) ** 5      # ease-out quint: fast start, long settle
+        self.pos = self._anim_from + (self.target - self._anim_from) * e
+        widget.queue_draw()
         return True
 
     def current_idx(self):
@@ -234,58 +461,76 @@ class Coverflow:
         cr.arc(x + r, y + h - r, r, pi / 2, pi)
         cr.close_path()
 
-    def bevel_rect(self, cr, x, y, w, h, sk):
-        cr.move_to(x + sk, y)
-        cr.line_to(x + w, y)
-        cr.line_to(x + w - sk, y + h)
-        cr.line_to(x, y + h)
-        cr.close_path()
+    def layout(self, W, H):
+        """Card boxes for a 1080p reference design, scaled to this screen."""
+        s = H / 1080.0
+        return {
+            "s": s,
+            "cx": W / 2.0,
+            "cy": H * 0.51,
+            "cw": CENTER_W * s,
+            "ch": CENTER_H * s,
+            "sw": SIDE_W * s,
+            "sh": SIDE_H * s,
+            "first": FIRST_OFF * s,
+            "step": STEP * s,
+        }
 
-    def paint_fit(self, cr, pb, bx, by, bw, bh, radius, sel, sk=0):
-        iw, ih = pb.get_width(), pb.get_height()
-        s = min(bw / iw, bh / ih)
-        dw, dh = iw * s, ih * s
-        dx, dy = bx + (bw - dw) / 2, by + (bh - dh) / 2
+    def card_box(self, L, d):
+        """Width/height/x-offset/rotation for a card at (fractional) distance
+        d from the selection. Everything lerps side<->center so the flip
+        animation is smooth."""
+        t = min(abs(d), 1.0)
+        w = L["cw"] + (L["sw"] - L["cw"]) * t
+        h = L["ch"] + (L["sh"] - L["ch"]) * t
+        ad = abs(d)
+        if ad <= 1.0:
+            off = L["first"] * ad
+        else:
+            off = L["first"] + (ad - 1.0) * L["step"]
+        return w, h, off, TILT * t
+
+    def paint_card(self, cr, entry, L, d):
+        pb, surface = entry
+        w, h, off, rot = self.card_box(L, d)
+        x = L["cx"] + (off if d > 0 else -off if d < 0 else 0) - w / 2
+        y = L["cy"] - h / 2
+        radius = 9 * L["s"]
 
         cr.save()
-        if sk > 0:
-            self.bevel_rect(cr, dx, dy, dw, dh, sk)
-        else:
-            self.round_rect(cr, dx, dy, dw, dh, radius if sel else 10)
+        cr.translate(x + w / 2, y + h / 2)
+        cr.rotate(rot)
+        cr.translate(-w / 2, -h / 2)
+
+        cr.set_source_rgba(0, 0, 0, 0.32)
+        self.round_rect(cr, 0, 7 * L["s"], w, h, radius)
+        cr.fill()
+        cr.set_source_rgba(0, 0, 0, 0.18)
+        self.round_rect(cr, 0, 15 * L["s"], w, h, radius)
+        cr.fill()
+
+        cr.save()
+        self.round_rect(cr, 0, 0, w, h, radius)
         cr.clip()
-        surface = Gdk.cairo_surface_create_from_pixbuf(pb, 1, None)
-        cr.set_source_surface(surface, dx, dy)
+        iw, ih = pb.get_width(), pb.get_height()
+        sc = max(w / iw, h / ih)          # cover crop, image fills the card
+        dw, dh = iw * sc, ih * sc
+        cr.set_source_surface(surface, (w - dw) / 2, (h - dh) / 2)
         cr.paint()
-        if not sel:
-            cr.set_source_rgba(0, 0, 0, 0.42)
-            cr.rectangle(dx, dy, dw, dh)
-            cr.fill()
+        dim = min(abs(d), 1.0) * 0.10       # smooth side dim (no 0.5 pop)
+        if dim > 0.004:
+            cr.set_source_rgba(0, 0, 0, dim)
+            cr.paint()
         cr.restore()
 
-        if sel:
-            if sk > 0:
-                cr.save()
-                cr.set_source_rgba(0, 0, 0, 0.38)
-                cr.move_to(dx + sk, dy)
-                cr.line_to(dx, dy)
-                cr.line_to(dx, dy + dh)
-                cr.close_path()
-                cr.fill()
-                cr.move_to(dx + dw - sk, dy + dh)
-                cr.line_to(dx + dw, dy)
-                cr.line_to(dx + dw, dy + dh)
-                cr.close_path()
-                cr.fill()
-                cr.restore()
-            cr.save()
-            cr.set_source_rgba(1.0, 0.96, 0.42, 1.0)
-            cr.set_line_width(5)
-            if sk > 0:
-                self.bevel_rect(cr, dx, dy, dw, dh, sk)
-            else:
-                self.round_rect(cr, dx - 3, dy - 3, dw + 6, dh + 6, radius + 4)
+        ba = max(0.0, 1.0 - abs(d) / 0.5)   # accent border fades in smoothly
+        if ba > 0.02:
+            cr.set_source_rgba(self.accent[0], self.accent[1],
+                               self.accent[2], ba)
+            cr.set_line_width(max(2.0, 3 * L["s"]))
+            self.round_rect(cr, 1.5, 1.5, w - 3, h - 3, radius)
             cr.stroke()
-            cr.restore()
+        cr.restore()
 
     def wrap_d(self, i, base=None):
         if base is None:
@@ -299,65 +544,62 @@ class Coverflow:
                 d += n
         return d
 
+    def _static_layer(self, W, H, s):
+        """Top scrim + header text, rendered once per window size. Identical
+        every animation frame — caching it drops a full-window gradient fill
+        and text shaping from the per-frame cost."""
+        key = (W, H, round(s, 4))
+        if self._bg_key == key:
+            return self._bg_surf
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
+        c = cairo.Context(surf)
+        g = cairo.LinearGradient(0, 0, 0, 175 * s)
+        g.add_color_stop_rgba(0.0, 0, 0, 0, 0.58)
+        g.add_color_stop_rgba(1.0, 0, 0, 0, 0.0)
+        c.set_source(g)
+        c.paint()
+        c.select_font_face("Sans", cairo.FONT_SLANT_NORMAL,
+                           cairo.FONT_WEIGHT_BOLD)
+        c.set_font_size(30 * s)
+        c.set_source_rgba(1, 1, 1, 0.96)
+        c.move_to(30 * s, 56 * s)
+        c.show_text("Wallpapers")
+        tw = c.text_extents("Wallpapers").width
+        c.select_font_face("Sans", cairo.FONT_SLANT_NORMAL,
+                           cairo.FONT_WEIGHT_NORMAL)
+        c.set_font_size(15 * s)
+        c.set_source_rgba(1, 1, 1, 0.62)
+        c.move_to(30 * s + tw + 10 * s, 56 * s)
+        c.show_text("·  Esc close")
+        c.set_source_rgba(1, 1, 1, 0.66)
+        c.move_to(31 * s, 86 * s)
+        c.show_text("%s — %d wallpapers" % (DIR, self.n))
+        surf.flush()
+        self._bg_key, self._bg_surf = key, surf
+        return surf
+
     def on_draw(self, da, cr):
-        from math import cos
         W = da.get_allocated_width()
         H = da.get_allocated_height()
-        cr.set_source_rgba(0.03, 0.03, 0.04, 0.30)
+        L = self.layout(W, H)
+        s = L["s"]
+
+        cr.set_source_surface(self._static_layer(W, H, s), 0, 0)
         cr.paint()
 
-        base_w = min(W * 0.60, 1180)
-        base_h = base_w * 9 / 16
-        step = min(W * 0.30, 300)
-        cx = W / 2 + XOFF
-        cy = H / 2 - 20
-
-        cur = round(self.pos)
-        order = sorted(range(self.n),
-                       key=lambda i: -abs(self.wrap_d(i, cur)))
-        for i in order:
+        # only the ±(MAX_SIDE+1) window around the selection can be visible;
+        # sorting all n (182) indices every frame was pure per-frame waste.
+        base = int(round(self.pos))
+        for k in sorted(range(-(MAX_SIDE + 1), MAX_SIDE + 2),
+                        key=lambda k: -abs(k)):
+            i = (base + k) % self.n
             d = self.wrap_d(i)
-            if abs(d) > 2.6:
+            if abs(d) > MAX_SIDE + 0.5:
                 continue
-            a = max(0.0, abs(d) - 0.0) * 0.45
-            a = min(a, 1.15) * (1 if d >= 0 else -1)
-            s = 1.0 - 0.22 * abs(d)
-            if abs(d) > 1:
-                s -= 0.17 * (abs(d) - 1)
-            s = max(s, 0.28)
-            slot_w = base_w * s
-            slot_h = base_h * s
-            x = cx + d * step
-            y = cy - slot_h / 2
-
-            pb = self.pb(i)
-            if pb is None:
+            entry = self.pb(i)
+            if entry is None:
                 continue
-
-            cr.save()
-            if d > 0.05:
-                cr.translate(x, y + slot_h / 2)
-                cr.rotate(a)
-                cr.translate(-x, -(y + slot_h / 2))
-            elif d < -0.05:
-                cr.translate(x + slot_w, y + slot_h / 2)
-                cr.rotate(a)
-                cr.translate(-(x + slot_w), -(y + slot_h / 2))
-            sel = abs(d) <= 0.5
-            sk = (20 + 260 * abs(d)) if sel else 0
-            self.paint_fit(cr, pb, x, y, slot_w, slot_h,
-                           14 if sel else 8, sel, sk)
-            cr.restore()
-            if d == 0:
-                pass
-        cr.set_source_rgba(1.0, 0.2, 0.2, 0.7)
-        cr.set_line_width(1.5)
-        cr.move_to(cx - 18, cy)
-        cr.line_to(cx + 18, cy)
-        cr.stroke()
-        cr.move_to(cx, cy - 18)
-        cr.line_to(cx, cy + 18)
-        cr.stroke()
+            self.paint_card(cr, entry, L, d)
         return False
 
     def on_keypress(self, win, ev):
@@ -379,16 +621,12 @@ class Coverflow:
         if ev.keyval == Gdk.KEY_Home:
             # nearest copy of the FIRST item on the infinite strip
             self.target += self.wrap_d(0, self.target)
-            if not self.ticking:
-                self.ticking = True
-                GLib.timeout_add(16, self.tick)
+            self._start_anim()
             return True
         if ev.keyval == Gdk.KEY_End:
             # nearest copy of the LAST item on the infinite strip
             self.target += self.wrap_d(self.n - 1, self.target)
-            if not self.ticking:
-                self.ticking = True
-                GLib.timeout_add(16, self.tick)
+            self._start_anim()
             return True
         return False
 
@@ -402,28 +640,22 @@ class Coverflow:
         return False
 
     def on_click(self, da, ev):
+        # keyboard-first: a click only counts after the pointer has moved
+        if not self._armed:
+            return False
         W = da.get_allocated_width()
         H = da.get_allocated_height()
-        base_w = min(W * 0.60, 1180)
-        base_h = base_w * 9 / 16
-        step = min(W * 0.30, 300)
-        cx = W / 2 + XOFF
-        cy = H / 2 - 20
-        d = round(self.pos) - self.pos
-        if self.n > 1:
-            while d > self.n / 2:
-                d -= self.n
-            while d < -self.n / 2:
-                d += self.n
-        x = cx + d * step
-        y = cy - base_h / 2
-        if x <= ev.x <= x + base_w and y <= ev.y <= y + base_h:
+        L = self.layout(W, H)
+        x = L["cx"] - L["cw"] / 2
+        y = L["cy"] - L["ch"] / 2
+        if (x <= ev.x <= x + L["cw"] and y <= ev.y <= y + L["ch"]):
             self.apply(self.files[self.current_idx()])
             return True
         return False
 
     def apply(self, path):
         if path:
+            save_state(path)
             with open(CONF, "w") as f:
                 f.write("preload = %s\nwallpaper = eDP-1,%s\n" % (path, path))
             subprocess.Popen(
@@ -441,8 +673,8 @@ def selftest(argv):
             ok += 1
         else:
             bad += 1
-    print("selftest: %d files, thumbs ok=%d bad=%d, cache=%s"
-          % (len(files), ok, bad, THUMB))
+    print("selftest: %d files, thumbs ok=%d bad=%d, cache=%s, accent=%s"
+          % (len(files), ok, bad, THUMB, theme_accent()))
 
 
 def main(argv):

@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+# Widget Dino — offline T-Rex style endless runner (Google dino homage).
+# Click the widget to give it the keyboard (layer ON_DEMAND mode), then:
+#   Space / Up / click = jump      Down = duck (fast-fall)      R = restart
+# Frame-clock paced, accent-colored dino, speed ramps up as you survive.
+import json
+import os
+import random
+import sys
+
+sys.path.insert(0, os.path.expanduser("~/.local/bin"))
+import widget_lib
+from widget_lib import mkwin, one_instance
+
+pidf = one_instance("dino")
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk
+import cairo
+
+ACC = "#" + widget_lib.accent()
+GRAY = "#9a9aa2"
+BESTF = os.path.expanduser("~/.cache/widget-dino.best")
+
+e = widget_lib.entry("dino")
+sw, sh = widget_lib.monitor_size()
+W = max(240, int(sw * e.get("w", 0.3)))
+H = max(110, int(sh * e.get("h", 0.14)))
+
+win, box = mkwin("dino", "")
+da = Gtk.DrawingArea()
+da.set_size_request(W, H)
+box.pack_start(da, True, True, 0)
+
+# a game needs keys: let the surface grab the keyboard when clicked
+# (falls back to mouse-only if the layer-shell mode is unavailable)
+win.set_can_focus(True)
+win.set_accept_focus(True)
+try:
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell
+    GtkLayerShell.set_keyboard_mode(win, GtkLayerShell.KeyboardMode.ON_DEMAND)
+except Exception as ex:
+    print("dino: keyboard ON_DEMAND failed:", ex, file=sys.stderr)
+
+GX = 30                 # dino x
+DW, DH = 26, 30         # dino box (standing)
+DH_DUCK = 16            # dino box (ducking)
+GY = H - 18             # ground line y
+GRAV = 2600.0
+JUMP_V = 620.0
+
+try:
+    BEST = int(open(BESTF).read().strip())
+except (OSError, ValueError):
+    BEST = 0
+
+P = {"ho": 0.0, "vy": 0.0, "duck": False, "obs": [], "sp": 420.0,
+     "dist": 0.0, "dead": False, "spawn": 1.2, "leg": 0.0, "flash": 0.0}
+
+
+def rects(a, b):
+    return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and
+            a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def reset():
+    P.update(ho=0.0, vy=0.0, duck=False, obs=[], sp=420.0, dist=0.0,
+             dead=False, spawn=1.2, flash=0.0)
+
+
+def die():
+    global BEST
+    P["dead"] = True
+    P["flash"] = 0.0
+    sc = int(P["dist"])
+    if sc > BEST:
+        BEST = sc
+        try:
+            with open(BESTF, "w") as f:
+                f.write(str(BEST))
+        except OSError:
+            pass
+
+
+def jump():
+    if P["dead"]:
+        if P["flash"] > 0.35:
+            reset()
+        return
+    if P["ho"] <= 0.0:
+        P["vy"] = JUMP_V
+        P["ho"] = 0.01
+
+
+def step(dt):
+    if P["dead"]:
+        P["flash"] += dt
+        return
+    P["leg"] += dt * (P["sp"] / 55.0)
+    if P["ho"] > 0.0 or P["vy"] > 0.0:
+        P["vy"] -= GRAV * dt
+        P["ho"] += P["vy"] * dt
+        if P["ho"] <= 0.0:
+            P["ho"] = 0.0
+            P["vy"] = 0.0
+    P["sp"] = min(950.0, P["sp"] + 9.0 * dt)
+    P["dist"] += P["sp"] * dt / 10.0
+    for o in P["obs"]:
+        o["x"] -= P["sp"] * dt
+    P["obs"] = [o for o in P["obs"] if o["x"] > -50]
+    P["spawn"] -= dt
+    if P["spawn"] <= 0:
+        P["obs"].append({"x": W + 24,
+                         "w": random.choice([14, 18, 24, 30]),
+                         "h": random.choice([26, 30, 34])})
+        # gap must stay jumpable at any speed
+        P["spawn"] = random.uniform(0.8, 1.6) * (430.0 / P["sp"]) + 0.35
+    dh = DH_DUCK if (P["duck"] and P["ho"] <= 0.0) else DH
+    d = (GX, GY - P["ho"] - dh, DW, dh)
+    for o in P["obs"]:
+        if rects(d, (o["x"], GY - o["h"], o["w"], o["h"])):
+            die()
+            return
+
+
+def on_draw(w, ctx):
+    aw = w.get_allocated_width()
+    ah = w.get_allocated_height()
+    ctx.set_operator(cairo.OPERATOR_CLEAR)
+    ctx.paint()
+    ctx.set_operator(cairo.OPERATOR_OVER)
+
+    # ground + dashes
+    ctx.set_source_rgba(1, 1, 1, 0.35)
+    ctx.set_line_width(1.5)
+    ctx.move_to(0, GY)
+    ctx.line_to(aw, GY)
+    ctx.stroke()
+    ctx.set_source_rgba(1, 1, 1, 0.16)
+    ctx.set_line_width(2)
+    off = (P["dist"] * 10.0) % 44.0
+    x = -off
+    while x < aw:
+        ctx.move_to(x, GY + 5)
+        ctx.line_to(x + 16, GY + 5)
+        x += 44
+    ctx.stroke()
+
+    # obstacles (cacti)
+    for o in P["obs"]:
+        ox, oh, ow = o["x"], o["h"], o["w"]
+        ctx.set_source_rgb(0.60, 0.60, 0.64)
+        ctx.rectangle(ox, GY - oh, ow * 0.45, oh)
+        ctx.fill()
+        ctx.rectangle(ox + ow * 0.55, GY - oh * 0.75, ow * 0.4, oh * 0.75)
+        ctx.fill()
+        ctx.rectangle(ox - ow * 0.25, GY - oh * 0.6, ow * 0.3, oh * 0.35)
+        ctx.fill()
+
+    # dino (accent colored)
+    ctx.set_source_rgb(int(ACC[1:3], 16) / 255.0,
+                       int(ACC[3:5], 16) / 255.0,
+                       int(ACC[5:7], 16) / 255.0)
+    if P["duck"]:
+        dy = GY - P["ho"] - DH_DUCK
+        ctx.rectangle(GX, dy + 4, DW + 8, DH_DUCK - 4)   # body
+        ctx.rectangle(GX + DW - 2, dy, 14, 10)            # head
+        ctx.fill()
+        ctx.rectangle(GX - 8, dy + 5, 9, 5)               # tail
+        ctx.fill()
+    else:
+        dy = GY - P["ho"] - DH
+        ctx.rectangle(GX, dy + 10, DW - 4, DH - 16)       # body
+        ctx.rectangle(GX + DW - 10, dy, 13, 13)           # head
+        ctx.fill()
+        ctx.rectangle(GX - 8, dy + 10, 9, 6)              # tail
+        ctx.fill()
+        if P["ho"] <= 0.0 and not P["dead"]:              # running legs
+            ph = int(P["leg"]) % 2
+            ctx.rectangle(GX + 3 + ph * 8, dy + DH - 6, 6, 6)
+            ctx.rectangle(GX + 11 - ph * 8, dy + DH - 6, 6, 6)
+        else:
+            ctx.rectangle(GX + 4, dy + DH - 6, 6, 6)
+            ctx.rectangle(GX + 13, dy + DH - 6, 6, 6)
+        ctx.fill()
+        ctx.set_source_rgba(0, 0, 0, 0.85)                # eye
+        ctx.rectangle(GX + DW - 1, dy + 3, 3, 3)
+        ctx.fill()
+
+    # score
+    ctx.select_font_face("monospace")
+    ctx.set_font_size(13)
+    ctx.set_source_rgba(1, 1, 1, 0.72)
+    sc = str(int(P["dist"]))
+    ext = ctx.text_extents(sc)
+    ctx.move_to(aw - ext.width - 8, 16)
+    ctx.show_text(sc)
+    if BEST:
+        ctx.set_font_size(10)
+        ctx.set_source_rgba(1, 1, 1, 0.40)
+        be = ctx.text_extents("HI %d" % BEST)
+        ctx.move_to(aw - be.width - 8, 30)
+        ctx.show_text("HI %d" % BEST)
+
+    if P["dead"]:
+        ctx.set_font_size(15)
+        ctx.set_source_rgba(1, 1, 1, 0.92)
+        ge = ctx.text_extents("GAME OVER")
+        ctx.move_to((aw - ge.width) / 2.0, ah / 2.0 - 4)
+        ctx.show_text("GAME OVER")
+        ctx.set_font_size(11)
+        ctx.set_source_rgba(1, 1, 1, 0.55)
+        re = ctx.text_extents("Space / click to restart")
+        ctx.move_to((aw - re.width) / 2.0, ah / 2.0 + 16)
+        ctx.show_text("Space / click to restart")
+    return False
+
+
+_last = [0.0]
+
+
+def on_tick(w, fc):
+    t = fc.get_frame_time() / 1e6
+    if _last[0] == 0.0:
+        _last[0] = t
+    dt = min(0.05, max(0.0, t - _last[0]))
+    _last[0] = t
+    step(dt)
+    w.queue_draw()
+    return True
+
+
+def on_click(w, ev):
+    jump()
+    return True
+
+
+def on_key(win_, ev):
+    k = ev.keyval
+    if k in (Gdk.KEY_space, Gdk.KEY_Up, Gdk.KEY_KP_Up,
+             Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+        jump()
+        return True
+    if k in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
+        if not P["duck"]:
+            P["duck"] = True
+            if P["ho"] > 0.0:
+                P["vy"] = -1000.0          # fast fall
+        return True
+    if k in (Gdk.KEY_r, Gdk.KEY_R):
+        reset()
+        return True
+    return False
+
+
+def on_key_up(win_, ev):
+    if ev.keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
+        P["duck"] = False
+        return True
+    return False
+
+
+def on_destroy(*a):
+    try:
+        os.unlink(pidf)
+    except OSError:
+        pass
+    Gtk.main_quit()
+
+
+da.set_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+da.connect("draw", on_draw)
+da.connect("button-press-event", on_click)
+win.connect("key-press-event", on_key)
+win.connect("key-release-event", on_key_up)
+da.add_tick_callback(on_tick)
+win.connect("destroy", on_destroy)
+win.show_all()
+Gtk.main()

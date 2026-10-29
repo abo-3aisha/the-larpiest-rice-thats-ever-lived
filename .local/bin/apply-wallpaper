@@ -31,12 +31,25 @@ LOG="$HOME/.cache/wallpaper-apply.log"
 log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" >> "$LOG" 2>/dev/null; }
 say() { notify-send -t 3000 "Wallpaper" "$1" 2>/dev/null; }
 
-# Serialise overlapping switches; a stale lock never blocks a wallpaper forever.
+# Serialise overlapping switches. NEVER steal a FRESH holder's lock — the
+# old code waited then `rmdir`'d it, so a burst of switches ran in PARALLEL
+# (that was the 9x wallpaper log / widget respawn storm). A lock older than
+# 60s is a crash leftover and is safe to reclaim.
 LOCK="$HOME/.cache/.wallpaper.lock"
-mkdir "$LOCK" 2>/dev/null || {
-    for _ in $(seq 30); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-    rmdir "$LOCK" 2>/dev/null || true
-}
+got_lock=0
+for _ in $(seq 100); do
+    if mkdir "$LOCK" 2>/dev/null; then
+        got_lock=1
+        break
+    fi
+    # Reclaim a stale lock (holder died without the EXIT trap).
+    if [ -d "$LOCK" ]; then
+        _age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || date +%s) ))
+        [ "$_age" -gt 60 ] && rmdir "$LOCK" 2>/dev/null && continue
+    fi
+    sleep 0.1
+done
+[ "$got_lock" = 1 ] || exit 0
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 # --------------------------------------------------------------------------
@@ -52,6 +65,57 @@ path=$(readlink -f -- "$path" 2>/dev/null || printf '%s' "$path")
 
 mon=$(hyprctl monitors 2>/dev/null | awk 'NR==1 && $1=="Monitor" {print $2}')
 mon="${mon:-eDP-1}"
+
+# --------------------------------------------------------------------------
+# X11 twin path (bspwm session): feh for stills, mpv --wid as a root window
+# for video. No awww animation on X11 — one re-theme call, same pipeline end.
+#
+# Detect X11 even when WAYLAND_DISPLAY is a STALE leftover from a previous
+# Hyprland session (systemd --user keeps the var after logout). Ground truth:
+# XDG_SESSION_TYPE=x11, or no reachable Wayland socket, or bspwm is running.
+# --------------------------------------------------------------------------
+is_x11=0
+if [ -n "${DISPLAY:-}" ]; then
+    if [ "${XDG_SESSION_TYPE:-}" = "x11" ]; then
+        is_x11=1
+    elif [ -z "${WAYLAND_DISPLAY:-}" ]; then
+        is_x11=1
+    elif [ ! -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${WAYLAND_DISPLAY}" ]; then
+        is_x11=1
+    elif command -v bspc >/dev/null 2>&1 && bspc wm -g >/dev/null 2>&1; then
+        is_x11=1
+    fi
+fi
+if [ "$is_x11" = 1 ]; then
+    is_video=0
+    case "${path,,}" in
+        *.mp4|*.mkv|*.webm|*.mov|*.avi|*.m4v) is_video=1 ;;
+    esac
+    theme_frame="$path"
+    killall mpv 2>/dev/null
+    if [ "$is_video" -eq 1 ]; then
+        # root-window wallpaper: mpv stays below everything (-wid root)
+        nohup mpv --no-audio --loop --wid="$(xwininfo -root | awk '/Window id:/{print $4}')" \
+            --panscan=1.0 --no-border --geometry=100%x100% --really-quiet \
+            "$path" >/dev/null 2>&1 &
+        # still grab a frame for the theme
+        ffmpeg -v error -y -ss 0.5 -i "$path" -frames:v 1 \
+            "$HOME/.cache/video-wallpaper/frame.png" 2>/dev/null \
+            && theme_frame="$HOME/.cache/video-wallpaper/frame.png"
+    else
+        feh --bg-fill "$path" 2>/dev/null || \
+            xsetroot -bitmap "$path" 2>/dev/null || true
+    fi
+    printf 'preload = %s\nwallpaper = %s,%s\n' "$path" "${mon:-screen}" "$path" > "$CONF" 2>/dev/null
+    python3 "$HOME/.config/hypr/themes/palette.py" --apply --wall "$theme_frame" \
+        >/dev/null 2>&1
+    "$HOME/.local/bin/bspwm-theme" 2>/dev/null || true
+    # palette --apply already restarted waybar with config.x11 on X11;
+    # SIGUSR2 is a cheap extra refresh in case a bar missed the restart.
+    killall -SIGUSR2 waybar 2>/dev/null || true
+    log "x11 applied $(basename "$path") (video=$is_video)"
+    exit 0
+fi
 
 # A video is anything awww cannot show on its own; everything else (jpg, png,
 # webp, gif) is handled by awww directly.

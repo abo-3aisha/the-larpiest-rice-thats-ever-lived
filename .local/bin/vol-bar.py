@@ -265,7 +265,7 @@ if screen.get_rgba_visual():
 
 css = ("""
  #volbar { background-color: rgba(16,18,22,0.92);
-           background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%, rgba(255,255,255,0));
+           background-image: linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 45%%, rgba(255,255,255,0));
            border-radius: 16px;
            border: 1px solid rgba(255,255,255,0.10);
            box-shadow: inset 0 1px 0 rgba(255,255,255,0.30),
